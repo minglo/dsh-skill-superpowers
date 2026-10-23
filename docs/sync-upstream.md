@@ -1,8 +1,3 @@
----
-name: superpower-sync-upstream
-description: Use when the vendored upstream skills tree must be refreshed from a new upstream release. Re-vendors it, re-applies the dsh adaptations (the namespace strip, the tool mapping, the harness prune) and updates the recorded pin.
----
-
 # Syncing the Vendored Upstream
 
 This plugin **vendors** an upstream skills project and applies a small,
@@ -12,18 +7,18 @@ both, and no script or document repeats it. The tree is disposable; the adaptati
 
 ```
 skills/                     == upstream verbatim + scripted adaptations
-skills/superpower-*/        == skills THIS package authors (a sync never touches these)
 scripts/sync-skills.mjs     == the ONLY source of local divergence
 package.json#upstream       == the tag+commit vendored last
 ```
 
-**Never hand-edit the upstream-owned parts of `skills/`.** A sync replaces every
-upstream directory wholesale, so a hand edit there is lost. If an adaptation is
-wrong, fix `scripts/sync-skills.mjs` or `references/dsh-tools.md` instead.
+**Never hand-edit `skills/`.** A sync replaces every upstream directory
+wholesale, so a hand edit there is lost. If an adaptation is wrong, fix
+`scripts/sync-skills.mjs` or `references/dsh-tools.md` instead.
 
-Skills under `skills/superpower-*` are this package's own and live here natively
-— edit them directly. `artifacts.json#skillTree.own` names them, and a sync
-neither deletes them nor copies over them.
+This package ships no skills of its own: every skill under `skills/` is upstream
+owned, so `artifacts.json#skillTree.own` is empty and a sync rebuilds the whole
+tree. Maintenance guidance lives in `docs/`, deliberately outside `skills/`, so
+it never appears in the skill catalog a session receives.
 
 A sync is correct when re-running it reports `nothing to sync`.
 
@@ -77,9 +72,9 @@ so our own skills and the tool mapping go with it.
 | Rewrite the personal-skills path in `writing-skills` | It names two pruned files in prose. |
 | Restore the executable bit on shebang files | Some packagers and git-on-Windows drop it, and the skills invoke those scripts directly. |
 
-Files exempt from the namespace strip are the tool mapping and this skill, whose
+Files exempt from the namespace strip are the tool mapping and this guide, whose
 prose intentionally *mentions* `superpowers:` to explain that it does not exist
-on dsh.
+on dsh. (`docs/` sits outside `skills/`, so exempting it costs nothing.)
 
 **If upstream adds a harness**, its new `references/<name>-tools.md` will be
 vendored and then survive the prune unless you add it to

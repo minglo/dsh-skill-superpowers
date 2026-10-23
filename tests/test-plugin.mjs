@@ -2,7 +2,7 @@
 // two contributions behave, mirroring how the harness drives them.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import test, { after } from 'node:test'
@@ -52,9 +52,6 @@ const EXPECTED_SKILLS = [
   'verification-before-completion',
   'writing-plans',
   'writing-skills',
-  // This adapter's own skills (live natively in skills/).
-  'superpower-monitor-upstream',
-  'superpower-sync-upstream',
   // artifacts:expected-skills:end
 ]
 
@@ -230,7 +227,15 @@ test('a host with no skills root degrades without failing activation', async () 
   assert.ok(Array.isArray(logs.warn))
 })
 
-test('scripts the skills invoke directly keep their executable bit', () => {
+test('scripts the skills invoke directly keep their executable bit', (t) => {
+  // NTFS has no POSIX mode bits: `statSync().mode & 0o111` is always 0 there,
+  // whatever the file is, so asserting on it tests the host rather than the
+  // package. The bit that matters on Windows is git's, and the index plus
+  // .gitattributes carry it. Skip with a reason instead of failing.
+  if (process.platform === 'win32') {
+    t.skip('NTFS has no POSIX mode bits; git carries the 100755 instead')
+    return
+  }
   const expected = [
     'brainstorming/scripts/start-server.sh',
     'subagent-driven-development/scripts/review-package',
@@ -258,13 +263,10 @@ test('the plugin leaves watching to the provider default', async () => {
 
 test('no skill still carries a Claude Code namespace reference', () => {
   // The adapter's strip pass rewrites every `superpowers:<name>` cross-reference
-  // to the bare DSH skill name. Two files are intentionally exempt:
-  //   - the tool mapping, which explains that no such prefix exists on dsh;
-  //   - the maintenance skill, which cites `superpowers:brainstorming` as the
-  //     exact call that dsh rejects.
+  // to the bare DSH skill name. The tool mapping is intentionally exempt: it
+  // explains that no such prefix exists on dsh, so mentioning one is the point.
   const exempt = new Set([
     'skills/using-superpowers/references/dsh-tools.md',
-    'skills/superpower-sync-upstream/SKILL.md',
   ])
   let out = ''
   try {
@@ -283,11 +285,48 @@ test('no skill still carries a Claude Code namespace reference', () => {
     .filter((rel) => !exempt.has(rel))
   assert.deepEqual(offenders, [], `these files still reference superpowers: ${offenders.join(', ')}`)
 
-  // Exempt files must be explanatory, not an instruction to call a prefixed name.
+  // The exempt file must be explanatory, not an instruction to call a prefixed name.
   const mapping = readFileSync(join(packageRoot, 'skills/using-superpowers/references/dsh-tools.md'), 'utf8')
   assert.match(mapping, /Names carry no\s+`superpowers:` prefix/)
-  const syncSkill = readFileSync(join(packageRoot, 'skills/superpower-sync-upstream/SKILL.md'), 'utf8')
-  assert.match(syncSkill, /is a hard error/)
+})
+
+test('the harness-neutral pass touches only home paths, never harness names', () => {
+  // The pass exists to stop a dsh user being sent to `~/.claude/...`, which does
+  // not exist here. It must NOT rename the instruction file itself: upstream
+  // names the instruction files as a list, "(CLAUDE.md, AGENTS.md, GEMINI.md,
+  // …)", so a bare rename turns it into "(AGENTS.md, AGENTS.md, …)" and a
+  // rename on disk leaves a file whose name and contents disagree. Both
+  // regressions shipped once.
+  for (const rel of [
+    'skills/using-superpowers/SKILL.md',
+    'skills/diagnosing-superpowers/prompts/request-conflicts.md',
+  ]) {
+    const text = readFileSync(join(packageRoot, rel), 'utf8')
+    assert.ok(
+      !/AGENTS\.md,\s*AGENTS\.md/.test(text),
+      `${rel} repeats AGENTS.md in one list`,
+    )
+    assert.match(text, /CLAUDE\.md/, `${rel} should keep naming CLAUDE.md verbatim`)
+  }
+
+  // The worked example keeps its upstream filename and contents: it is a record
+  // of a test campaign run against Claude Code, not advice for a dsh user.
+  const example = join(packageRoot, 'skills/writing-skills/references/CLAUDE_MD_TESTING.md')
+  assert.ok(existsSync(example), 'the example should keep its upstream name')
+  assert.ok(
+    !existsSync(join(packageRoot, 'skills/writing-skills/references/AGENTS_MD_TESTING.md')),
+    'no renamed copy should be produced',
+  )
+  assert.match(readFileSync(example, 'utf8'), /~\/\.claude\/skills\//, 'its recorded paths are evidence')
+})
+
+test('CREATION-LOG.md keeps the paths it recorded, not rewritten ones', () => {
+  // A creation log is history: "Extracted debugging framework from
+  // `~/.claude/CLAUDE.md`" says what happened. Retargeting that path would
+  // make the record false, so the harness-neutral pass must skip these files.
+  const log = readFileSync(join(packageRoot, 'skills/systematic-debugging/CREATION-LOG.md'), 'utf8')
+  assert.match(log, /\.claude\/CLAUDE\.md/, 'the recorded path should survive untouched')
+  assert.ok(!/\.agents\/AGENTS\.md/.test(log), 'history should not be retargeted')
 })
 
 // Watching is the provider's own default (true) and the plugin deliberately does

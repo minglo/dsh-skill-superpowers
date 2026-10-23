@@ -39,11 +39,8 @@
     ]
   },
   "skillTree": {
-    "$comment": "Where skills live. `own` names the skills this package authors; they live natively in skills/ and a sync must never delete them. Everything else under skills/ is upstream-owned and is rebuilt from the checkout on every sync.",
+    "$comment": "Where skills live. `own` names the skills this package authors; they live natively in skills/ and a sync must never delete them. Everything else under skills/ is upstream-owned and is rebuilt from the checkout on every sync. This package deliberately authors none: maintenance guidance lives in docs/ instead, so the skill catalog a session receives is exactly upstream's.",
     "root": "skills",
-    "own": [
-      "superpower-monitor-upstream",
-      "superpower-sync-upstream"
-    ]
+    "own": []
   }
 }

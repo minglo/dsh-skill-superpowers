@@ -30,6 +30,8 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINE_PATH = join(packageRoot, 'scripts/upstream-baseline.json')
 const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
 const pin = pkg.upstream ?? {}
+/** `own` names skills this package authors; empty here, read rather than assumed. */
+const artifacts = JSON.parse(readFileSync(join(packageRoot, 'artifacts.json'), 'utf8'))
 
 const args = process.argv.slice(2)
 const asJson = args.includes('--json')
@@ -244,8 +246,10 @@ function skillNames(root) {
 }
 
 const theirs = skillNames(checkoutDir)
-// Our own skills live only in our tree and are never upstream's business.
-const ownSkills = new Set(['superpower-sync-upstream', 'superpower-monitor-upstream'])
+// This package authors no skills of its own: `artifacts.json#skillTree.own` is
+// empty, so every name under `skills/` is upstream's. Read the manifest rather
+// than hard-coding names that a future change would silently desynchronize.
+const ownSkills = new Set(artifacts.skillTree?.own ?? [])
 
 // The delta that matters is upstream-at-pin vs upstream-at-target. Comparing
 // against OUR tree would report everything we deliberately do not vendor

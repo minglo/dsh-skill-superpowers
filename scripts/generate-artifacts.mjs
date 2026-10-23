@@ -151,10 +151,13 @@ function renderSkillTable() {
   )
   // 只列自有技能的名字。名字是派生的，措辞是通用的，
   // 因此新增技能或改写描述都不会让这里过时。
-  lines.push(
-    `| 本包自有的 ${own.size} 个技能 | `
-    + `${[...own].sort().map((n) => `\`${n}\``).join('、')} |`,
-  )
+  // 没有自有技能时整行省略：本包的全部技能都来自上游，这一行会变成噪音。
+  if (own.size > 0) {
+    lines.push(
+      `| 本包自有的 ${own.size} 个技能 | `
+      + `${[...own].sort().map((n) => `\`${n}\``).join('、')} |`,
+    )
+  }
   return lines.join('\n')
 }
 

@@ -1,11 +1,6 @@
----
-name: superpower-monitor-upstream
-description: Use when you need to know whether the vendored upstream skills project has published something new and whether it changes anything for this dsh package. Checks the recorded pin, classifies the delta (new skills, rebuilt skills, removed files, new harness support), and reports what needs a decision.
----
-
 # Monitoring Upstream
 
-`superpower-sync-upstream` answers "how do I adopt a release". This skill answers
+`docs/sync-upstream.md` answers "how do I adopt a release". This guide answers
 the question that comes first: **has anything changed, and does it matter here?**
 
 Run it on a schedule, before a release, or when someone reports that upstream
@@ -67,8 +62,8 @@ or **exclude** (remove it in the sync script so the exclusion is reproducible),
 then record the choice in `package.json#upstream`. Never silently vendor a skill
 that cannot run; it becomes a trap for the next reader.
 
-## What This Skill Does Not Do
+## What This Guide Does Not Do
 
 It does not change the pin and does not sync. Reporting is separate from
 adopting on purpose: a human decides whether a release is worth taking, and
-`superpower-sync-upstream` carries out that decision.
+`docs/sync-upstream.md` carries out that decision.

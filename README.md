@@ -70,10 +70,11 @@ dsh --profile web headless "我们做一个 react todo list"
 |---|---|
 | 15 个上游技能 | `ctx.skills.registerProvider(...)` —— 一个指向本包的私有 `dsh-skill-filesystem` 实例，位于 `bundledSkillDir`，rank `600`，每个 `<skills>/<name>/SKILL.md` 一个候选 |
 | `using-superpowers` 引导段 | `ctx.systemPrompt.section({ name: 'superpowers:bootstrap', order: 121 })`，从第一轮起就装配进每一次请求 |
-| 本包自有的 2 个技能 | `superpower-monitor-upstream`、`superpower-sync-upstream` |
 <!-- artifacts:skill-table:end -->
 
-这两个 `superpower-*` 技能是本包自己写的：一个用来查上游有没有动，一个用来采用新版本。
+**本包不写自己的技能。** `skills/` 里的 15 个技能全部来自上游，`artifacts.json#skillTree.own`
+为空。上游同步与上游监控的说明放在 `docs/`，不注册为技能 —— 它们只对维护者有
+用，不该占用每次会话收到的技能目录。
 
 rank `600` 即 `BUNDLED_SKILL_RANK`：项目级（`.agents/skills`，rank 100/200）或用户级
 （`~/.agents/skills`，rank 400/500）的同名技能会胜出 —— 对用户自己写的技能来说，这个
@@ -105,8 +106,9 @@ rank `600` 即 `BUNDLED_SKILL_RANK`：项目级（`.agents/skills`，rank 100/20
 index.js                  适配器 —— 惰性导入官方 provider
 cordis.patch.yml          dsh bundle 行（由 artifacts.json 生成）
 artifacts.json            所有派生产物的唯一来源
-skills/                   上游技能树 + 适配改动 + 本包自有技能
+skills/                   上游技能树 + 适配改动（本包不写自有技能）
 references/dsh-tools.md   dsh 工具映射 —— 母本，会被安装进技能树
+docs/                     维护指南（上游监控、上游同步），不注册为技能
 scripts/                  同步 / 监控 / 产物生成脚本
   upstream-baseline.json  上游在记录版本上交付了什么（监控脚本的数据）
 tests/test-plugin.mjs     测试套件
@@ -142,11 +144,10 @@ node tests/test-plugin.mjs                 # 跑测试套件
 和 `sync-skills --check` 不可能对「哪些文件属于 `skills/`」产生分歧。两个脚本的
 `--check` 在漂移时都会以非零码退出，CI 跑的就是这个。
 
-一次同步只重建 `skills/` 下**归上游所有**的目录。本包自有技能
-（`skills/superpower-*`，在 `artifacts.json#skillTree.own` 中声明）原生就住在那里，
-不会被动。工具映射是唯一需要重新落盘的文件，因为它位于一个归上游所有的目录**内部** ——
-`references/dsh-tools.md` 是它的母本，`sync-skills.mjs` 会重跑
-`generate-artifacts.mjs` 把它放回去。
+一次同步重建 `skills/` 下**归上游所有**的全部目录。本包不自有任何技能
+（`artifacts.json#skillTree.own` 为空），所以整棵树都由上游重建。工具映射是唯一需要
+重新落盘的文件，因为它位于一个归上游所有的目录**内部** —— `references/dsh-tools.md`
+是它的母本，`sync-skills.mjs` 会重跑 `generate-artifacts.mjs` 把它放回去。
 
 ### 对全新上游技能树施加的适配
 
@@ -186,7 +187,8 @@ node scripts/check-upstream.mjs --record-baseline --offline <checkout>
 ```
 
 如何读报告、如何采用一个版本（包括遇到无法在 dsh 上跑的技能该怎么办），见
-`superpower-monitor-upstream` 和 `superpower-sync-upstream` 两个技能。
+[`docs/monitor-upstream.md`](docs/monitor-upstream.md) 和
+[`docs/sync-upstream.md`](docs/sync-upstream.md)。
 
 ## 致谢与许可
 
