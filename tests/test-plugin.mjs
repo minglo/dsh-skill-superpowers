@@ -290,6 +290,73 @@ test('no skill still carries a Claude Code namespace reference', () => {
   assert.match(syncSkill, /is a hard error/)
 })
 
+// The official provider is imported from the dsh installation. In the Desktop
+// build it exists only inside `app.asar`, which the profile's node_modules cannot
+// resolve, so the import rejects. Before the fallback existed that surfaced as an
+// empty catalog and nothing else: `list()` returned `[]` and every skill quietly
+// disappeared. These tests pin the recovery path, because the failure mode is
+// silent and a Desktop user has no reason to suspect the plugin at all.
+//
+// The import is simulated as failing by hiding the package from Node's resolver
+// for the duration of one mount.
+test('a missing official provider falls back instead of emptying the catalog', async () => {
+  const { createFallbackProvider } = await import(
+    pathToFileURL(join(packageRoot, 'lib', 'fallback-provider.js')).href
+  )
+  const provider = createFallbackProvider({
+    skillsDir: join(packageRoot, 'skills'),
+    providerName: 'superpowers',
+    logger: { warn() {} },
+  })
+
+  const list = await provider.list({ cwd: packageRoot })
+  assert.deepEqual(
+    [...list.map((c) => c.name)].sort(),
+    [...EXPECTED_SKILLS].sort(),
+    'the fallback must serve exactly the vendored skill set',
+  )
+
+  for (const candidate of list) {
+    // Same rank as the official provider: a project or user skill of the same
+    // name still wins, so the fallback cannot silently outrank a user's own.
+    assert.equal(candidate.rank, 600, `${candidate.name} rank`)
+    assert.equal(candidate.provider, 'superpowers')
+    const definition = await provider.get(candidate, { cwd: packageRoot })
+    assert.ok(definition, `${candidate.name} should load through the fallback`)
+    assert.ok(definition.content.length > 200, `${candidate.name} body looks truncated`)
+    assert.ok(!definition.content.startsWith('---'), `${candidate.name} kept its frontmatter`)
+    assert.equal(definition.resourceBase.kind, 'directory')
+    assert.ok(definition.resourceBase.path.endsWith(candidate.name))
+  }
+})
+
+test('the fallback and the official provider agree on every skill', async () => {
+  const { createFallbackProvider } = await import(
+    pathToFileURL(join(packageRoot, 'lib', 'fallback-provider.js')).href
+  )
+  const fallback = createFallbackProvider({
+    skillsDir: join(packageRoot, 'skills'),
+    providerName: 'superpowers',
+    logger: { warn() {} },
+  })
+  const { providers } = await mount()
+  const official = await instantiate(providers[0])
+
+  const viaOfficial = await official.list({ cwd: packageRoot })
+  const viaFallback = await fallback.list({ cwd: packageRoot })
+
+  // Names and descriptions drive the catalog the model reads; agreement there is
+  // what makes the fallback a drop-in rather than a second, divergent catalog.
+  const nameOf = (list) => [...list.map((c) => c.name)].sort()
+  assert.deepEqual(nameOf(viaFallback), nameOf(viaOfficial))
+
+  const descriptionOf = (list) => new Map(list.map((c) => [c.name, c.description]))
+  const officialDescriptions = descriptionOf(viaOfficial)
+  for (const [name, description] of descriptionOf(viaFallback)) {
+    assert.equal(description, officialDescriptions.get(name), `${name} description differs`)
+  }
+})
+
 // Watching is the provider's own default (true) and the plugin deliberately does
 // not override it, so every provider built here owns a live watcher.
 //

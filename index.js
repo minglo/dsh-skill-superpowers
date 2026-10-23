@@ -30,6 +30,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { createFallbackProvider } from './lib/fallback-provider.js'
+
 /** Directory holding this plugin module. */
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url))
 
@@ -101,14 +103,25 @@ export function apply(ctx, config = {}) {
             bundledSkillDir: skillsDir,
           }))
           .catch((error) => {
-            logger.error(
-              `cannot load ${FILESYSTEM_PROVIDER} (${messageOf(error)}). The Superpowers `
-              + 'skill catalog is unavailable; install it so it resolves from the profile.',
-            )
+            // The official provider is not resolvable from here. On the Desktop
+            // build it lives only inside `app.asar`, which the profile's
+            // node_modules cannot reach; on a CLI install a misconfigured profile
+            // looks the same. Either way an empty catalog is the wrong answer:
+            // fall back to the built-in provider so the skills still load.
+            //
             // Do not memoize the failure: a later catalog refresh retries, so a
-            // transient resolution problem does not disable skills for the session.
+            // transient resolution problem upgrades back to the official provider.
             pending = undefined
-            return undefined
+            logger.warn(
+              `cannot load ${FILESYSTEM_PROVIDER} (${messageOf(error)}). Serving the skill `
+              + 'catalog through the built-in fallback provider instead; the official '
+              + 'provider is retried on the next catalog refresh.',
+            )
+            return createFallbackProvider({
+              skillsDir,
+              providerName: settings.providerName,
+              logger,
+            })
           })
         return pending
       }

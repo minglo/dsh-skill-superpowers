@@ -11,6 +11,10 @@
    `skill` 工具加载任意一个。复用官方 provider 意味着 frontmatter 解析、扁平文件、
    `whenToUse`、调用策略、符号链接处理和目录监听全都来自 harness —— 包括后续 dsh
    版本里修好的问题。
+
+   官方 provider 解析不到时，插件会退回到**内置的兜底 provider**：同样的
+   `list()`/`get()` 协议、同样的 rank `600`、零运行时依赖，技能照常可用（见
+   [为什么需要兜底](#为什么需要兜底)）。
 2. **一段简短的「you have superpowers」引导段注入系统提示词**，让技能从每个会话的
    第一轮就生效 —— 无需配置，无需按会话开启。
 
@@ -26,6 +30,29 @@
 `Promise.withResolvers`，该 API 从 Node 22 起才有。在 Node 20 上监听会抛错，
 `list()` 返回 `{candidates, complete}` 而不是技能数组，**所有技能会静默消失**。
 本包只在 Node 24 上验证，因此 `engines` 就写 `>=24` —— 只承诺实际测过的版本。
+
+## 为什么需要兜底
+
+官方 provider 是更好的实现，但它住在 **dsh 安装内部**，从 profile 的 `node_modules`
+不一定解析得到。**Desktop 版就是这种情况**：整个 dsh 运行时打在 `app.asar` 里，
+profile 里没有 `@deepseek-ai/dsh-skill-filesystem` 这个包，`import()` 直接 reject。
+
+没有兜底时，这个失败表现为**技能全部静默消失**：`list()` 返回空数组，日志之外没有
+任何症状，用户很难想到问题出在插件上。它和上面 Node 20 的坑是同一类故障 ——
+「看起来装好了，但一个技能都没有」。
+
+所以插件保留官方 provider 作为首选，只在它不可用时退到内置实现：
+
+| | 官方 provider | 内置兜底 |
+|---|---|---|
+| 何时使用 | 解析得到就用 | 只在解析失败时 |
+| 依赖 | `@deepseek-ai/dsh-skill-filesystem` | 无（仅 Node 内置模块） |
+| 支持的技能形态 | 目录包 + 扁平文件 | 目录包（`<name>/SKILL.md`） |
+| frontmatter | 完整 YAML | 单行标量；多行/序列值会告警而非静默取空 |
+| 目录监听 | 有 | 无（技能树只在换包时变化） |
+| rank | 600 | 600（同名时用户技能仍优先） |
+
+失败不会被记住：下一次技能目录刷新会重试官方 provider，解析恢复后自动升回去。
 
 ```bash
 # 从 npm 安装（推荐）
