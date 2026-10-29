@@ -88,10 +88,15 @@ dsh --profile web headless "我们做一个 react todo list"
 |---|---|
 | 15 个上游技能 | `ctx.skills.register(...)` —— 每个 `<skills>/<name>/SKILL.md` 一个 runtime 技能，rank `250`（项目技能仍可覆盖），内容在 apply 时一次性读入 |
 | `using-superpowers` 引导段 | `ctx.systemPrompt.section({ name: 'superpowers:bootstrap', order: 121 })`，从第一轮起就装配进每一次请求 |
-| 本包自有的 2 个技能 | `superpower-monitor-upstream`、`superpower-sync-upstream` |
 <!-- artifacts:skill-table:end -->
 
-这两个 `superpower-*` 技能是本包自己写的：一个用来查上游有没有动，一个用来采用新版本。
+**本包不往技能目录里放自有技能。** `skills/` 里的 15 个技能全部来自上游，
+`artifacts.json#skillTree.own` 为空，所以每次会话收到的目录就是上游那一套。
+
+两个维护技能（查上游有没有动、怎么采用新版本）放在 `.agents/skills/`：dsh 会把
+仓库根下的 `.agents/skills/` 当作 project 级技能根扫描，所以**在本仓库里工作的
+贡献者**照样能调用它们；而 `package.json#files` 不打包 `.agents/`，所以**安装本包
+的用户**看不到它们。它们只对维护者有用，不该占用别人的技能目录。
 
 rank `250` 是 registry 给 runtime 技能的固定值：项目级（`.dsh/skills`、`.agents/skills`，
 rank 100/200）的同名技能会胜出，用户级（`~/.dsh/skills`、`~/.agents/skills`，rank 400/500）
@@ -123,7 +128,8 @@ rank 100/200）的同名技能会胜出，用户级（`~/.dsh/skills`、`~/.agen
 index.js                  适配器 —— 读技能树并注册到 ctx.skills
 cordis.patch.yml          dsh bundle 行（由 artifacts.json 生成）
 artifacts.json            所有派生产物的唯一来源
-skills/                   上游技能树 + 适配改动 + 本包自有技能
+skills/                   上游技能树 + 适配改动（本包不写自有技能）
+.agents/skills/           两个维护技能（仅本仓库贡献者可见，不随包发布）
 references/dsh-tools.md   dsh 工具映射 —— 母本，会被安装进技能树
 scripts/                  同步 / 监控 / 产物生成脚本
   upstream-baseline.json  上游在记录版本上交付了什么（监控脚本的数据）
@@ -158,12 +164,13 @@ node tests/test-plugin.mjs                 # 跑测试套件
 
 `scripts/lib/own-content.mjs` 是那份拷贝映射的唯一读取者，因此 `generate-artifacts`
 和 `sync-skills --check` 不可能对「哪些文件属于 `skills/`」产生分歧。两个脚本的
-`--check` 在漂移时都会以非零码退出，CI 跑的就是这个。
+`--check` 在漂移时都会以非零码退出，CI 跑的就是这个。自有技能不在映射里，因为
+它们不在 `skills/` 下。
 
-一次同步只重建 `skills/` 下**归上游所有**的目录。本包自有技能
-（`skills/superpower-*`，在 `artifacts.json#skillTree.own` 中声明）原生就住在那里，
-不会被动。工具映射是唯一需要重新落盘的文件，因为它位于一个归上游所有的目录**内部** ——
-`references/dsh-tools.md` 是它的母本，`sync-skills.mjs` 会重跑
+一次同步重建 `skills/` 下**归上游所有**的全部目录。本包不往这棵树里放自己的技能
+（`artifacts.json#skillTree.own` 为空，两个维护技能在 `.agents/skills/`，同步不碰它），
+所以整棵树都由上游重建。工具映射是唯一需要重新落盘的文件，因为它位于一个归上游
+所有的目录**内部** —— `references/dsh-tools.md` 是它的母本，`sync-skills.mjs` 会重跑
 `generate-artifacts.mjs` 把它放回去。
 
 ### 对全新上游技能树施加的适配
@@ -204,7 +211,9 @@ node scripts/check-upstream.mjs --record-baseline --offline <checkout>
 ```
 
 如何读报告、如何采用一个版本（包括遇到无法在 dsh 上跑的技能该怎么办），见
-`superpower-monitor-upstream` 和 `superpower-sync-upstream` 两个技能。
+`.agents/skills/superpower-monitor-upstream/` 与
+`.agents/skills/superpower-sync-upstream/` 两个技能 —— 在本仓库里工作的贡献者
+可以直接让 agent 调用它们。
 
 ## 致谢与许可
 

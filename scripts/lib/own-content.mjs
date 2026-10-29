@@ -1,9 +1,11 @@
 // What belongs to this adapter, and what belongs to upstream.
 //
-// `skills/` holds both: the vendored upstream tree, and the skills this package
-// authors itself. A sync must rebuild the first without touching the second, and
-// both sync-skills.mjs and generate-artifacts.mjs must agree on which is which —
-// so this module is the single reader of artifacts.json's ownership maps.
+// `skills/` is the vendored upstream tree. This package authors no skills inside
+// it (the two maintenance skills live in `.agents/skills/`, outside both this
+// root and the published package), so a sync rebuilds the whole tree from
+// upstream. `artifacts.json` still carries the ownership maps, because a copy
+// such as the tool mapping has to land *inside* an upstream-owned directory and
+// both scripts must agree on it — so this module is their single reader.
 import { readFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 
@@ -19,10 +21,10 @@ export function skillsRoot(packageRoot) {
 }
 
 /**
- * Skill directory names this package authors itself.
+ * Skill directory names this package authors itself inside `skills/`.
  *
- * These live natively in `skills/` (no second copy anywhere), so a sync must
- * treat them as untouchable.
+ * Empty by design: the maintenance skills live in `.agents/skills/`, so every
+ * directory under `skills/` belongs to upstream and a sync may rebuild it.
  */
 export function ownSkillNames(packageRoot) {
   const manifest = readManifest(packageRoot)
@@ -33,9 +35,8 @@ export function ownSkillNames(packageRoot) {
  * Files that must exist inside `skills/` but whose master copy is kept outside
  * it, because a sync replaces the upstream-owned directory around them.
  *
- * The maintenance skills are NOT here: they are our own top-level directories
- * under `skills/`, which a sync never touches. Only content that has to live
- * *inside* an upstream-owned directory needs this treatment.
+ * Own skills are NOT here: they live outside `skills/` entirely. Only content
+ * that has to live *inside* an upstream-owned directory needs this treatment.
  */
 export function ownContentInSkillsTree(packageRoot) {
   const manifest = readManifest(packageRoot)

@@ -39,11 +39,8 @@
     ]
   },
   "skillTree": {
-    "$comment": "Where skills live. `own` names the skills this package authors; they live natively in skills/ and a sync must never delete them. Everything else under skills/ is upstream-owned and is rebuilt from the checkout on every sync.",
+    "$comment": "Where skills live. `root` is the vendored upstream tree, rebuilt wholesale by every sync. `own` names skills this package authors *inside* that tree; it is deliberately empty, because the two maintenance skills live in `.agents/skills/` instead — dsh scans that as the project scope for contributors working in this repository, and `package.json#files` ships no `.agents/`, so users of the published package never see them.",
     "root": "skills",
-    "own": [
-      "superpower-monitor-upstream",
-      "superpower-sync-upstream"
-    ]
+    "own": []
   }
 }

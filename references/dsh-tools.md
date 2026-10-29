@@ -47,6 +47,26 @@ review prompts the skill names, and act on the report it returns. `workflow`
 runs a JavaScript script that fans work out across many subagents when the plan
 calls for large-scale parallel work.
 
+### Cheaper orchestration for subagent-driven development
+
+The controller session is the most expensive seat in a `subagent-driven-development`
+run: it reads every dispatch result and every report, and it usually runs on the
+session's most capable model. dsh can run the whole loop one layer down.
+
+When your human partner asks for it — or says the session model is too expensive
+to spend on coordination — dispatch ONE orchestrator subagent with the plan path
+and the instruction to run `subagent-driven-development` end to end. Give that
+call a mid-tier `model` (and its `provider`); the tool only exposes those route
+fields when the deployment enabled subagent model selection, so fall back to the
+inherited route when it does not. The orchestrator then dispatches its own
+implementers and reviewers per that skill's Model Selection. The workspace and
+ledger live on disk, so nothing is lost to the extra layer. Its final message
+must carry the "Rulings I made" list verbatim — that list is how the decisions
+reach your human partner, and you relay it, not summarize it.
+
+Do this only for a whole plan. Nesting a single task's dispatch buys nothing and
+adds a seat.
+
 ## Task lists
 
 `todo_write` is dsh's task list. Superpowers skills that mention `TodoWrite` (or

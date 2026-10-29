@@ -11,8 +11,8 @@ repository and records the revision last vendored — it is the single source fo
 both, and no script or document repeats it. The tree is disposable; the adaptations are declarative.
 
 ```
+.agents/skills/             == skills THIS package authors (contributors only)
 skills/                     == upstream verbatim + scripted adaptations
-skills/superpower-*/        == skills THIS package authors (a sync never touches these)
 scripts/sync-skills.mjs     == the ONLY source of local divergence
 package.json#upstream       == the tag+commit vendored last
 ```
@@ -21,9 +21,12 @@ package.json#upstream       == the tag+commit vendored last
 upstream directory wholesale, so a hand edit there is lost. If an adaptation is
 wrong, fix `scripts/sync-skills.mjs` or `references/dsh-tools.md` instead.
 
-Skills under `skills/superpower-*` are this package's own and live here natively
-— edit them directly. `artifacts.json#skillTree.own` names them, and a sync
-neither deletes them nor copies over them.
+The maintenance skills live in `.agents/skills/`, which dsh scans as its project
+scope for anyone working inside this repository. Contributors get them; users of
+the published package never do, because `package.json#files` ships no `.agents/`.
+They are ordinary skills — edit them directly. `artifacts.json#skillTree.own`
+stays empty on purpose: it describes what this package authors *inside* `skills/`,
+which is nothing, and a sync rebuilds that tree from upstream alone.
 
 A sync is correct when re-running it reports `nothing to sync`.
 
@@ -64,9 +67,10 @@ node scripts/sync-skills.mjs /tmp/superpowers --tag <TAG>
 ```
 
 This rebuilds `skills/` from the checkout, re-applies the adaptations, and then
-**automatically re-runs `generate-artifacts.mjs`** to put this adapter's own
-files back. That last step is not optional: the rebuild deletes the whole tree,
-so our own skills and the tool mapping go with it.
+**automatically re-runs `generate-artifacts.mjs`** to put the tool mapping back.
+That last step is not optional: the rebuild deletes the whole upstream tree, and
+the mapping lives inside one of those directories. `.agents/skills/` is outside
+that tree, so a sync never touches these guides.
 
 | Adaptation | Why |
 |---|---|
@@ -77,9 +81,9 @@ so our own skills and the tool mapping go with it.
 | Rewrite the personal-skills path in `writing-skills` | It names two pruned files in prose. |
 | Restore the executable bit on shebang files | Some packagers and git-on-Windows drop it, and the skills invoke those scripts directly. |
 
-Files exempt from the namespace strip are the tool mapping and this skill, whose
-prose intentionally *mentions* `superpowers:` to explain that it does not exist
-on dsh.
+The only file exempt from the namespace strip is the tool mapping, whose prose
+intentionally *mentions* `superpowers:` to explain that it does not exist on
+dsh. These guides live outside `skills/`, so the pass never reaches them.
 
 **If upstream adds a harness**, its new `references/<name>-tools.md` will be
 vendored and then survive the prune unless you add it to

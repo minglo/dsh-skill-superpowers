@@ -151,10 +151,14 @@ function renderSkillTable() {
   )
   // 只列自有技能的名字。名字是派生的，措辞是通用的，
   // 因此新增技能或改写描述都不会让这里过时。
-  lines.push(
-    `| 本包自有的 ${own.size} 个技能 | `
-    + `${[...own].sort().map((n) => `\`${n}\``).join('、')} |`,
-  )
+  // 本包自有技能住在 `.agents/skills/`（只对仓库贡献者可见），不在 `skills/` 里，
+  // 所以 `own` 为空时整行省略，而不是渲染成「本包自有的 0 个技能」。
+  if (own.size > 0) {
+    lines.push(
+      `| 本包自有的 ${own.size} 个技能 | `
+      + `${[...own].sort().map((n) => `\`${n}\``).join('、')} |`,
+    )
+  }
   return lines.join('\n')
 }
 

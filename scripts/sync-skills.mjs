@@ -2,8 +2,10 @@
 // Upstream coordinates come from package.json#upstream — the single place the
 // repository is named.
 //
-// `skills/` is a copy of the upstream skills tree plus this adapter's own
-// additions:
+// `skills/` is a copy of the upstream skills tree with this adapter's
+// adaptations applied to it. The package authors no skills inside that tree;
+// the two maintenance skills live in `.agents/skills/`, which a sync never
+// touches. The adaptations are:
 //
 //   1. the sed pass that strips Claude Code's `superpowers:` namespace from
 //      cross-skill references (dsh's skill-name grammar rejects `:`, and the
@@ -22,7 +24,7 @@
 //   node scripts/sync-skills.mjs <checkout> [--tag v6.4.2]
 //   node scripts/sync-skills.mjs --check [<checkout>]   # report drift, write nothing
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,10 +50,13 @@ const MAPPING_REL = 'using-superpowers/references/dsh-tools.md'
 /**
  * Files whose prose deliberately *mentions* the Claude Code namespace and must
  * therefore be exempt from the strip: the tool mapping explains that no such
- * prefix exists, and this adapter's own skill cites `superpowers:brainstorming`
- * as the error case. Stripping either would invert its meaning.
+ * prefix exists, so stripping it would invert its meaning.
+ *
+ * The maintenance skills used to live under `skills/` and needed the same
+ * exemption. They moved to `.agents/skills/`, which this pass never walks, so
+ * the set is down to one.
  */
-const NAMESPACE_EXEMPT = new Set([MAPPING_REL, 'superpower-sync-upstream/SKILL.md', 'superpower-monitor-upstream/SKILL.md'])
+const NAMESPACE_EXEMPT = new Set([MAPPING_REL])
 /** Claude Code's namespace reference, which dsh's name grammar rejects. */
 const NAMESPACE = /superpowers:([a-z0-9][a-z0-9-]*)/g
 
@@ -101,54 +106,28 @@ const PERSONAL_SKILLS_REPLACEMENT =
   + 'See [dsh-tools.md](../using-superpowers/references/dsh-tools.md).\n'
 
 /**
- * Upstream's worked example for stress-testing skill documentation is written
- * against Claude Code: it hard-codes `~/.claude/skills/` and CLAUDE.md. The
- * example itself is worth keeping — it is the only full worked test campaign in
- * the tree — but those paths are wrong on dsh and read as advice a dsh user
- * cannot follow.
+ * Home-directory rewrites: only the paths that would send a dsh user somewhere
+ * that does not exist.
  *
- * So keep the example and retarget its vocabulary at the cross-runtime names.
- * `AGENTS.md` and `~/.agents/skills/` are the industry-standard spellings that
- * Codex, Copilot CLI and Gemini CLI all read, and dsh accepts
- * `~/.agents/skills/` as an alias too — so the rewritten example stays true for
- * every harness, rather than being dsh-specific advice.
+ * Scope is deliberately narrow. Anything that merely *names* another harness —
+ * an instruction-file list, a worked example's title, a historical note — is
+ * left verbatim: it is upstream's text about upstream, the reader can tell, and
+ * rewriting it would make the vendored tree drift from the source of truth for
+ * no functional gain. Earlier revisions of this script did rewrite those, which
+ * is how `(AGENTS.md, AGENTS.md, GEMINI.md)` and a falsified creation log got
+ * shipped; the rename also turned a test example into a file whose name no
+ * longer matched its contents.
  *
- * The file is renamed as well, so the reference that points at it still
- * resolves; see RENAMED_REFERENCES.
+ * So: rewrite `~/.claude/...` (a path a dsh user would actually try to use) and
+ * nothing else. `writing-skills` gets a targeted sentence rewrite below because
+ * its original points at two files this package prunes.
  */
 const HARNESS_NEUTRAL_REWRITES = [
-  // Whole config paths first, before any bare-name rule can leave a mixed path
-  // like `~/.claude/AGENTS.md` that exists nowhere.
+  // Longest prefix first, so a shorter rule cannot leave a mixed path that
+  // exists nowhere.
   [/~\/\.claude\/skills\//g, '~/.agents/skills/'],
   [/~\/\.claude\/CLAUDE\.md/g, '~/.agents/AGENTS.md'],
   [/~\/\.claude\//g, '~/.agents/'],
-  // The instruction file: title, prose, and the example's own filename.
-  [/CLAUDE\.md/g, 'AGENTS.md'],
-  [/CLAUDE_MD_TESTING\.md/g, 'AGENTS_MD_TESTING.md'],
-  // One variant names the vendor instead of the harness.
-  [/Claude\.AI Emphatic Style/g, 'AGENTS.md Emphatic Style'],
-  // "Claude might think it knows..." — the subject is the agent, not a vendor.
-  [/\bClaude might think\b/g, 'an agent might think'],
-  // Bare "Claude Code" in ordinary prose. Consuming the preceding article
-  // matters: upstream writes "the Claude Code layout", and substituting only the
-  // name would yield "the the agent runtime".
-  //
-  // Deliberately NOT a blanket replacement. In a sentence that is *listing*
-  // harnesses, dropping the vendor name loses the reader information — "Claude
-  // Code and Codex" becomes "the agent runtime and Codex". Those places keep the
-  // name, so this rule is anchored to the two shapes upstream actually uses when
-  // it means "the harness generically".
-  [/\b(?:the|a|an)\s+Claude Code\s+(?=layout|session|transcript)/gi, 'the agent runtime '],
-  [/\bClaude Code layout\b/g, 'the agent runtime layout'],
-]
-
-/**
- * Files vendored under a neutral name, [from, to] relative to the skills root.
- * Kept separate from the text rewrites so a rename failure is loud rather than
- * leaving a file whose name no longer matches its contents.
- */
-const RENAMED_REFERENCES = [
-  ['writing-skills/references/CLAUDE_MD_TESTING.md', 'writing-skills/references/AGENTS_MD_TESTING.md'],
 ]
 
 if (!existsSync(join(sourceSkills, 'using-superpowers', 'SKILL.md'))) {
@@ -195,7 +174,6 @@ function applyAdaptations(root, { log = false } = {}) {
     platformEntry: false,
     pruned: [],
     rewrotePersonalSkills: false,
-    renamed: [],
     harnessNeutral: [],
     files: 0,
   }
@@ -213,10 +191,10 @@ function applyAdaptations(root, { log = false } = {}) {
     }
   }
 
-  // NOTE: this adapter's own top-level skills are NOT copied here — a sync
-  // never touches them. Only content that must live *inside* an upstream-owned
-  // directory (the tool mapping) needs re-materialising, and
-  // generate-artifacts.mjs owns that from artifacts.json.
+  // NOTE: this package's own skills are NOT copied here — they live outside
+  // `skills/` (in `.agents/skills/`) and a sync never touches them. Only content
+  // that must live *inside* an upstream-owned directory (the tool mapping) needs
+  // re-materialising, and generate-artifacts.mjs owns that from artifacts.json.
 
   // Prune the other harnesses' reference docs: this package supports dsh only,
   // and their cross-references dangle once the files are gone.
@@ -257,23 +235,25 @@ function applyAdaptations(root, { log = false } = {}) {
     }
   }
 
-  // Upstream's worked test campaign hard-codes Claude Code paths and filenames.
-  // Retarget it at the cross-runtime names so every harness it mentions still
-  // resolves. Renames run before the text pass so the write lands on the new
-  // name.
-  for (const [from, to] of RENAMED_REFERENCES) {
-    const source = join(root, from)
-    if (!existsSync(source)) continue
-    renameSync(source, join(root, to))
-    summary.renamed.push(`${from} -> ${to}`)
-  }
-
   // Our own skills are excluded: they are this package's own prose and may
   // deliberately name a harness when explaining what upstream assumes.
+  //
+  // Records and worked examples are excluded too, because their text is a
+  // report of what happened rather than advice for the current reader:
+  //
+  //   - `CREATION-LOG.md` says "Extracted debugging framework from
+  //     `~/.claude/CLAUDE.md`" in the past tense; rewriting the path makes the
+  //     log false.
+  //   - `CLAUDE_MD_TESTING.md` is upstream's transcript of a test campaign run
+  //     against Claude Code — every path in it is evidence, and there is nothing
+  //     in it a dsh user is meant to follow. Retargeting it would leave a file
+  //     whose name and contents no longer agree.
+  const RECORD_FILE = /(^|\/)(CREATION-LOG|CLAUDE_MD_TESTING)\.md$/
   const ownNames = new Set(ownSkillNames(packageRoot))
   for (const rel of listFiles(root)) {
     if (!rel.endsWith('.md')) continue
     if (ownNames.has(rel.split('/')[0])) continue
+    if (RECORD_FILE.test(rel)) continue
     const full = join(root, rel)
     const before = readFileSync(full, 'utf8')
     let after = before
@@ -288,17 +268,24 @@ function applyAdaptations(root, { log = false } = {}) {
 
   // Some packagers and git-on-Windows drop the executable bit, and the skills
   // invoke these scripts directly. Anything with a shebang must be executable.
-  for (const rel of listFiles(root)) {
-    const full = join(root, rel)
-    const first = readFileSync(full, 'utf8').split('\n', 1)[0]
-    if (!first.startsWith('#!')) continue
-    if ((statSync(full).mode & 0o111) === 0) execFileSync('chmod', ['+x', full])
+  //
+  // Windows has no `chmod` binary, so this step aborted the whole sync there
+  // with ENOENT — on a tree whose adaptations had already been applied
+  // correctly, which made a successful sync look like a failure. NTFS has no
+  // POSIX mode bits to restore anyway: git's index carries the 100755 and
+  // .gitattributes keeps it. Skip on Windows rather than fake it.
+  if (process.platform !== 'win32') {
+    for (const rel of listFiles(root)) {
+      const full = join(root, rel)
+      const first = readFileSync(full, 'utf8').split('\n', 1)[0]
+      if (!first.startsWith('#!')) continue
+      if ((statSync(full).mode & 0o111) === 0) execFileSync('chmod', ['+x', full])
+    }
   }
 
   summary.files = listFiles(root).length
   if (log) {
     for (const line of summary.namespaced) console.log(`    namespace stripped: ${line}`)
-    for (const line of summary.renamed) console.log(`    renamed: ${line}`)
     for (const line of summary.harnessNeutral) console.log(`    harness-neutral: ${line}`)
   }
   return summary
@@ -337,13 +324,13 @@ let drift
 try {
   cpSync(sourceSkills, staging, { recursive: true })
   applyAdaptations(staging)
-  // The expected tree is "upstream + adaptations + everything we own". Own
+  // The expected tree is "upstream + adaptations + copied-in content". Own
   // content must be included or the diff below would report our own files as
   // upstream drift on every run:
   //   - the tool mapping, which lives inside an upstream-owned directory and is
   //     re-materialised from references/ by generate-artifacts;
-  //   - our own skills, which live natively under skills/ and a sync never
-  //     touches, so the checked-in copy is authoritative for them.
+  //   - any skill this package authors inside `skills/` (none today: `own` is
+  //     empty and the maintenance skills live in `.agents/skills/`).
   for (const { from, targetRel } of ownContentInSkillsTree(packageRoot)) {
     const dest = join(staging, targetRel)
     mkdirSync(dirname(dest), { recursive: true })
@@ -381,10 +368,9 @@ for (const line of drift) console.log(`  ${line}`)
 // from scratch. Adaptations are declarative, so "fresh upstream + apply" is
 // always the correct end state — there is no three-way merge to get wrong.
 //
-// Our own skills are deliberately left in place: they live natively under
-// skills/ (no second copy to keep in step), and only the upstream-owned
-// directories are rebuilt. Deleting the whole tree would take them with it and
-// force a copy-back from somewhere else.
+// Skills this package authors inside `skills/` are deliberately left in place
+// (there are none today, and `.agents/skills/` is outside this tree entirely),
+// so only upstream-owned directories are rebuilt.
 const own = ownSkillNames(packageRoot)
 mkdirSync(target, { recursive: true })
 let replaced = 0
