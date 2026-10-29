@@ -24,10 +24,10 @@ source for both.
 ## Skills
 
 dsh has a native skill system: this plugin registers Superpowers' `skills/`
-directory as a skill provider, so the skill catalog the session receives lists
-every Superpowers skill and the `skill` tool loads one by name. Names carry no
-`superpowers:` prefix on dsh — `superpowers:brainstorming` in older prose is
-simply `brainstorming` here.
+directory into the skill registry, so the skill catalog the session receives
+lists every Superpowers skill and the `skill` tool loads one by name.
+Names carry no `superpowers:` prefix on dsh — `superpowers:brainstorming` in
+older prose is simply `brainstorming` here.
 
 Loading a skill's `SKILL.md` with `read` is **not** the mechanism on dsh. Use the
 `skill` tool; it returns the same body plus the base directory that the skill's

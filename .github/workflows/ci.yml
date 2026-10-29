@@ -16,18 +16,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Node 24. The floor is 22 — the dsh filesystem provider starts its
-      # watcher with `Promise.withResolvers`, which does not exist on 20, and
-      # there the watch throws, `list()` returns a `{candidates, complete}`
-      # page instead of the skill array, and every skill silently disappears.
-      # CI pins the newest line we test on; see package.json "engines".
+      # Node 24: the version this package is tested on (`package.json#engines`).
+      # CI pins the newest line rather than the floor so a regression in the
+      # current release shows up here first.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      # The peer is optional at install time; CI installs it so the provider
-      # can actually be imported and exercised.
-      - run: npm install --no-save @deepseek-ai/dsh-skill-filesystem
+      # No dependencies to install. The plugin imports nothing outside Node's
+      # built-ins -- `@deepseek-ai/dsh-skill` is a peer the host provides -- and
+      # the suite drives the plugin through a stub registry, so a bare checkout
+      # is enough to verify a release candidate.
 
       - name: Derived artifacts match artifacts.json
         run: node scripts/generate-artifacts.mjs --check

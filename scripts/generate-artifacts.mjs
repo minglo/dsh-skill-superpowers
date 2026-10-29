@@ -100,10 +100,10 @@ function renderPatch() {
   lines.push('# Nothing here edits a user\'s config: the install artifact is the install.')
   lines.push('#')
   lines.push('# The row mounts `index.js`, which')
-  lines.push('#   1. serves this package\'s vendored `skills/` tree through dsh\'s OWN')
-  lines.push('#      `@deepseek-ai/dsh-skill-filesystem` provider (a private instance at')
-  lines.push('#      `bundledSkillDir`, rank 600), so the skills load with dsh\'s native')
-  lines.push('#      `skill` tool and inherit that provider\'s parsing, watching and fixes; and')
+  lines.push('#   1. reads this package\'s vendored `skills/` tree once at activation and')
+  lines.push('#      registers it with `ctx.skills.register(...)` on dsh\'s own skill')
+  lines.push('#      registry, so the skills load with dsh\'s native `skill` tool and need')
+  lines.push('#      no skill-provider package to resolve from the profile; and')
   lines.push('#   2. contributes the `using-superpowers` bootstrap — with the dsh tool')
   lines.push('#      mapping — as the `superpowers:bootstrap` system-prompt section.')
   lines.push('')
@@ -140,9 +140,9 @@ function renderSkillTable() {
   lines.push('| 组成 | 在 dsh 上的落点 |')
   lines.push('|---|---|')
   lines.push(
-    `| ${upstreamSkills.length} 个上游技能 | \`ctx.skills.registerProvider(...)\` —— 一个指向本包的私有 `
-    + '`dsh-skill-filesystem` 实例，位于 `bundledSkillDir`，rank `600`，每个 '
-    + '`<skills>/<name>/SKILL.md` 一个候选 |',
+    `| ${upstreamSkills.length} 个上游技能 | \`ctx.skills.register(...)\` —— 每个 `
+    + '`<skills>/<name>/SKILL.md` 一个 runtime 技能，rank `250`（项目技能仍可覆盖），'
+    + '内容在 apply 时一次性读入 |',
   )
   lines.push(
     `| \`using-superpowers\` 引导段 | \`ctx.systemPrompt.section({ name: `

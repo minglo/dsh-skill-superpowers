@@ -2,36 +2,26 @@
 // two contributions behave, mirroring how the harness drives them.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import test, { after } from 'node:test'
+import test from 'node:test'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 // Fail once, clearly, instead of three times confusingly.
 //
-// The technical floor is Node 22: the dsh filesystem provider starts its watcher
-// with `Promise.withResolvers`, and on anything older the watch throws, `list()`
-// returns a `{candidates, complete}` page instead of the skill array, and the
-// resulting failures look like bugs in this package rather than a wrong Node.
-//
-// The declared floor is Node 24 (`engines`), because that is the version this
-// suite is actually run and verified against — npm reports "Unsupported engine"
-// below it, so complaining here too keeps the two from disagreeing.
+// The plugin itself only touches `node:fs` and the skill registry, so it has no
+// hard runtime floor beyond what dsh requires. The declared floor is Node 24
+// (`engines`) because that is the version this suite is run and verified
+// against — npm reports "Unsupported engine" below it, so complaining here too
+// keeps the two from disagreeing.
 const REQUIRED_NODE_MAJOR = 24
 const nodeMajor = Number(process.versions.node.split('.')[0])
 if (nodeMajor < REQUIRED_NODE_MAJOR) {
   throw new Error(
-    `Node ${process.version} is unsupported: this package needs Node >= ${REQUIRED_NODE_MAJOR}. `
-    + 'Below 22 the dsh skill provider cannot start its watcher (Promise.withResolvers), '
-    + 'so every skill silently disappears; 22 and 23 work but are not what we test.',
-  )
-}
-if (typeof Promise.withResolvers !== 'function') {
-  throw new Error(
-    `Node ${process.version} lacks Promise.withResolvers, which the dsh skill provider `
-    + 'needs; without it the watcher fails and every skill silently disappears.',
+    `Node ${process.version} is unsupported: this package needs Node >= ${REQUIRED_NODE_MAJOR}.`,
   )
 }
 
@@ -61,9 +51,13 @@ const EXPECTED_SKILLS = [
 /** Mount the plugin against stub services and return what it registered. */
 async function mount(config = {}) {
   const mod = await import(pathToFileURL(join(packageRoot, 'index.js')).href)
-  const providers = []
+  const registered = []
   const sections = []
   const logs = { info: [], warn: [], error: [] }
+  // The registry is stubbed rather than instantiated: `register` is the whole
+  // contract this plugin uses, and capturing its input lets the tests assert
+  // exactly what the model catalog would receive.
+  const disposers = []
   const ctx = {
     get: () => undefined,
     logger: {
@@ -72,27 +66,12 @@ async function mount(config = {}) {
       error: (m) => logs.error.push(m),
       debug: () => {},
     },
-    skills: { registerProvider: (factory) => { providers.push(factory); return () => {} } },
+    skills: { register: (skill) => { registered.push(skill); return () => {} } },
     systemPrompt: { section: (section) => { sections.push(section); return () => {} } },
-    effect: (fn) => fn(),
+    effect: (fn) => { const disposer = fn(); disposers.push(disposer); return disposer },
   }
-  // `watch` is the provider's own default (true) and the plugin no longer
-  // overrides it, so every mount starts a live chokidar watcher that holds the
-  // event loop open. `instantiate()` registers each provider it builds and the
-  // `after()` hook at the bottom of this file disposes them all, or the runner
-  // would never exit.
   mod.apply(ctx, config)
-  return { providers, sections, logs, mod }
-}
-
-/** Providers built during the run, so their watchers can be torn down. */
-const liveProviders = []
-
-/** Drive a provider factory to a resolved provider instance. */
-async function instantiate(factory) {
-  const provider = await factory({ signal: new AbortController().signal, invalidate: () => {} })
-  liveProviders.push(provider)
-  return provider
+  return { registered, sections, logs, disposers, mod }
 }
 
 test('module exports the cordis shape dsh loads', async () => {
@@ -111,8 +90,19 @@ test('package.json records the dsh bundle, the widened peer range and upstream p
 
   // The peer range deliberately spans the prerelease line; dsh validates peers
   // with includePrerelease, under which one range covers 0.0/0.1/0.2.
-  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-skill-filesystem'], '>=0.0.1-rc.1 <0.3.0-0')
-  assert.equal(pkg.peerDependenciesMeta['@deepseek-ai/dsh-skill-filesystem'].optional, true)
+  //
+  // The registry is the only dsh package this plugin needs: skills are
+  // registered through `ctx.skills.register`, so no skill-provider package has
+  // to resolve from the profile. That is what makes one code path work on the
+  // CLI, Web and Desktop builds alike.
+  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-skill'], '>=0.0.1-rc.1 <0.3.0-0')
+  assert.equal(pkg.peerDependenciesMeta, undefined, 'the registry peer is required, not optional')
+  assert.equal(pkg.devDependencies['@deepseek-ai/dsh-skill'], '>=0.0.1-rc.1 <0.3.0-0')
+  for (const field of ['peerDependencies', 'devDependencies', 'dependencies']) {
+    const names = Object.keys(pkg[field] ?? {})
+    const stray = names.filter((entry) => entry !== '@deepseek-ai/dsh-skill')
+    assert.deepEqual(stray, [], `${field} should only carry the registry`)
+  }
 
   // The repository is asserted by shape, not by literal: package.json#upstream
   // is the single source the scripts read, so a re-pointed upstream is a
@@ -123,9 +113,13 @@ test('package.json records the dsh bundle, the widened peer range and upstream p
   assert.match(pkg.upstream.synced, /^\d{4}-\d{2}-\d{2}$/)
 })
 
-test('apply registers exactly one provider and one bootstrap section', async () => {
-  const { providers, sections } = await mount()
-  assert.equal(providers.length, 1)
+test('apply registers every vendored skill and one bootstrap section', async () => {
+  const { registered, sections, disposers } = await mount()
+  assert.deepEqual([...registered.map((s) => s.name)].sort(), [...EXPECTED_SKILLS].sort())
+  // Every registration is bound to this plugin's effect scope, so unloading the
+  // plugin withdraws its skills instead of leaving them in the registry.
+  assert.equal(disposers.length, registered.length)
+
   assert.equal(sections.length, 1)
   assert.equal(sections[0].name, 'superpowers:bootstrap')
   // The order is fixed rather than configurable: dsh's own sections sit at
@@ -134,34 +128,46 @@ test('apply registers exactly one provider and one bootstrap section', async () 
   assert.equal(typeof sections[0].text, 'function')
 })
 
-test('the provider serves every vendored skill through the official provider', async () => {
-  const { providers } = await mount()
-  const provider = await instantiate(providers[0])
-  assert.equal(provider.name, 'superpowers')
-
-  const list = await provider.list({ cwd: packageRoot })
-  assert.deepEqual([...list.map((c) => c.name)].sort(), [...EXPECTED_SKILLS].sort())
-
-  // rank 600 == BUNDLED_SKILL_RANK: a project or user skill of the same name wins.
-  for (const candidate of list) {
-    assert.equal(candidate.rank, 600, `${candidate.name} should sit at the bundled rank`)
-    assert.equal(candidate.provider, 'superpowers')
+test('every registered skill is a complete definition the registry accepts', async () => {
+  const { registered } = await mount()
+  for (const skill of registered) {
+    assert.ok(skill.description.length > 0, `${skill.name} needs a description`)
+    assert.ok(skill.content.length > 200, `${skill.name} body looks truncated`)
+    assert.ok(!skill.content.startsWith('---'), `${skill.name} kept its frontmatter`)
+    assert.equal(skill.source, 'bundled')
+    assert.equal(skill.provider, 'superpowers')
+    assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
+    // resourceBase must point at the skill directory so relative resources resolve.
+    assert.equal(skill.resourceBase.kind, 'directory')
+    assert.ok(skill.resourceBase.path.endsWith(skill.name), `${skill.name} resourceBase`)
+    assert.ok(skill.path.endsWith(join(skill.name, 'SKILL.md')), `${skill.name} path`)
   }
 })
 
-test('every skill body loads, is non-trivial and strips frontmatter', async () => {
-  const { providers } = await mount()
-  const provider = await instantiate(providers[0])
-  const list = await provider.list({ cwd: packageRoot })
+test('a malformed skill is reported and skipped instead of registered empty', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'superpowers-skills-'))
+  try {
+    // Keep a valid bootstrap so the root is accepted, then add three bundles the
+    // registry would reject: no frontmatter, an invalid name, no description.
+    mkdirSync(join(root, 'using-superpowers'))
+    writeFileSync(
+      join(root, 'using-superpowers', 'SKILL.md'),
+      '---\nname: using-superpowers\ndescription: bootstrap\n---\nbody\n',
+    )
+    mkdirSync(join(root, 'no-frontmatter'))
+    writeFileSync(join(root, 'no-frontmatter', 'SKILL.md'), 'just text\n')
+    mkdirSync(join(root, 'Bad_Name'))
+    writeFileSync(join(root, 'Bad_Name', 'SKILL.md'), '---\nname: Bad_Name\ndescription: x\n---\nb\n')
+    mkdirSync(join(root, 'no-description'))
+    writeFileSync(join(root, 'no-description', 'SKILL.md'), '---\nname: no-description\n---\nb\n')
 
-  for (const candidate of list) {
-    const definition = await provider.get(candidate, { cwd: packageRoot })
-    assert.ok(definition, `${candidate.name} should load`)
-    assert.ok(definition.content.length > 200, `${candidate.name} body looks truncated`)
-    assert.ok(!definition.content.startsWith('---'), `${candidate.name} kept its frontmatter`)
-    // resourceBase must point at the skill directory so relative resources resolve.
-    assert.equal(definition.resourceBase.kind, 'directory')
-    assert.ok(definition.resourceBase.path.endsWith(candidate.name), `${candidate.name} resourceBase`)
+    const { registered, logs } = await mount({ skillsDir: root })
+    assert.deepEqual(registered.map((s) => s.name), ['using-superpowers'])
+    assert.ok(logs.warn.some((m) => m.includes('no usable frontmatter')))
+    assert.ok(logs.warn.some((m) => m.includes('not a kebab-case skill name')))
+    assert.ok(logs.warn.some((m) => m.includes('requires a description')))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
 
@@ -188,7 +194,7 @@ test('the bootstrap body comes from the vendored skills root', async () => {
 
 test('skills, bootstrap and toolMapping can be disabled independently', async () => {
   const off = await mount({ skills: false, bootstrap: false })
-  assert.equal(off.providers.length, 0)
+  assert.equal(off.registered.length, 0)
   assert.equal(off.sections.length, 0)
 
   const noMapping = await mount({ toolMapping: false })
@@ -197,10 +203,10 @@ test('skills, bootstrap and toolMapping can be disabled independently', async ()
   assert.ok(!text.includes('DeepSeek Harness (dsh) Tool Mapping'), 'mapping should be omitted')
 })
 
-test('providerName is configurable, and the section order is not', async () => {
-  const { providers, sections } = await mount({ providerName: 'sp-custom', order: 33 })
-  const provider = await instantiate(providers[0])
-  assert.equal(provider.name, 'sp-custom')
+test('providerName labels the registrations, and the section order is not configurable', async () => {
+  const { registered, sections } = await mount({ providerName: 'sp-custom', order: 33 })
+  assert.ok(registered.length > 0)
+  for (const skill of registered) assert.equal(skill.provider, 'sp-custom')
   // `order` is not part of the config surface: a stray value is ignored, so a
   // profile that still carries a stale `order:` cannot misplace the bootstrap.
   assert.equal(sections[0].order, 121)
@@ -213,21 +219,21 @@ test('an explicit skillsDir wins over the vendored tree', async () => {
 })
 
 test('a host with no skills root degrades without failing activation', async () => {
-  const { providers, sections, logs } = await mount({ skillsDir: '/nonexistent/superpowers' })
+  const { registered, sections } = await mount({ skillsDir: '/nonexistent/superpowers' })
   // The bad explicit root is skipped in favour of the vendored tree.
   assert.equal(sections.length, 1)
-  assert.ok(providers.length === 1)
+  assert.ok(registered.length > 0)
 
   const saved = process.env.SUPERPOWERS_SKILLS_DIR
+  process.env.SUPERPOWERS_SKILLS_DIR = '/nonexistent/env'
   try {
-    // With every candidate broken, activation must still succeed.
+    // A bad env root must not break activation either: the vendored tree wins.
     const isolated = await mount({ skillsDir: '/nonexistent/a' })
-    assert.ok(isolated.providers.length === 1 || isolated.logs.warn.length > 0)
+    assert.equal(isolated.registered.length, EXPECTED_SKILLS.length)
   } finally {
     if (saved === undefined) delete process.env.SUPERPOWERS_SKILLS_DIR
     else process.env.SUPERPOWERS_SKILLS_DIR = saved
   }
-  assert.ok(Array.isArray(logs.warn))
 })
 
 test('scripts the skills invoke directly keep their executable bit', () => {
@@ -245,15 +251,16 @@ test('scripts the skills invoke directly keep their executable bit', () => {
   }
 })
 
-test('the plugin leaves watching to the provider default', async () => {
-  // `watch` is no longer a plugin config key: the provider's own zod schema
-  // defaults it to true, so watching behaves exactly like the harness's other
-  // skill roots. Confirm a provider built through the plugin sees every skill
-  // with a live watcher attached; `after()` disposes it so the runner exits.
-  const { providers } = await mount()
-  const provider = await instantiate(providers[0])
-  const list = await provider.list({ cwd: packageRoot })
-  assert.equal(list.length, EXPECTED_SKILLS.length)
+test('the catalog is read once at activation, independent of the cwd', async () => {
+  // Deliberately `cwd`-insensitive: the skills ship inside this package, so a
+  // session opened anywhere sees the same catalog. This is the property that
+  // makes the Desktop build behave like every other deployment.
+  const first = await mount()
+  const second = await mount({ skillsDir: join(packageRoot, 'skills') })
+  assert.deepEqual(
+    first.registered.map((s) => s.name),
+    second.registered.map((s) => s.name),
+  )
 })
 
 test('no skill still carries a Claude Code namespace reference', () => {
@@ -290,34 +297,3 @@ test('no skill still carries a Claude Code namespace reference', () => {
   assert.match(syncSkill, /is a hard error/)
 })
 
-// Watching is the provider's own default (true) and the plugin deliberately does
-// not override it, so every provider built here owns a live watcher.
-//
-// That makes teardown worth spelling out. On Node < 22 the provider cannot start
-// its watcher at all: `@deepseek-ai/dsh-skill-filesystem` calls
-// `Promise.withResolvers`, which only exists from Node 22. Measured on Node
-// 20.19.5 with watch at its default:
-//
-//   warn: skill-filesystem: failed to watch <dir>: TypeError:
-//         Promise.withResolvers is not a function
-//   list()  -> { candidates, complete }        (NOT the 17-skill array)
-//   after dispose() -> 57 FSWatcher handles still open
-//
-// Two consequences, and the second is the confusing one: the leaked handles hold
-// the event loop, so the suite passes every assertion and then never exits. That
-// is exactly how it presented in CI — Node 20 hung past ten minutes while the
-// same suite finished in 0.1s on Node 22 locally.
-//
-// The package therefore requires Node >= 22 (`engines`), and CI pins 22. This
-// teardown is defensive for anyone who runs the suite on an older interpreter
-// anyway: `unref()` on top of `dispose()` is what actually lets the process exit.
-// It is test-side scaffolding, not a claim about our own code — the plugin passes
-// no `watch` option, so production behaviour matches every other dsh skill root.
-after(async () => {
-  await Promise.all(liveProviders.map((provider) => provider.dispose()))
-  for (const handle of process._getActiveHandles()) {
-    if (handle?.constructor?.name === 'FSWatcher' && typeof handle.unref === 'function') {
-      handle.unref()
-    }
-  }
-})

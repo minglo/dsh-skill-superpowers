@@ -15,10 +15,10 @@
 # Nothing here edits a user's config: the install artifact is the install.
 #
 # The row mounts `index.js`, which
-#   1. serves this package's vendored `skills/` tree through dsh's OWN
-#      `@deepseek-ai/dsh-skill-filesystem` provider (a private instance at
-#      `bundledSkillDir`, rank 600), so the skills load with dsh's native
-#      `skill` tool and inherit that provider's parsing, watching and fixes; and
+#   1. reads this package's vendored `skills/` tree once at activation and
+#      registers it with `ctx.skills.register(...)` on dsh's own skill
+#      registry, so the skills load with dsh's native `skill` tool and need
+#      no skill-provider package to resolve from the profile; and
 #   2. contributes the `using-superpowers` bootstrap — with the dsh tool
 #      mapping — as the `superpowers:bootstrap` system-prompt section.
 
@@ -32,7 +32,7 @@
         bootstrap: true
         # Append the dsh tool mapping to the bootstrap.
         toolMapping: true
-        # Skill-provider name registered on ctx.skills.
+        # Provider label recorded on every skill registered with ctx.skills.
         providerName: "superpowers"
         # Skills root. Empty = resolve automatically: config → SUPERPOWERS_SKILLS_DIR → <package>/skills → <package>/../skills.
         skillsDir: ""

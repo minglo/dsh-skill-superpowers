@@ -1,7 +1,7 @@
 {
   "name": "dsh-skill-superpowers",
   "version": "1.1.1",
-  "description": "Superpowers skills for the DeepSeek Harness (dsh): a full engineering methodology served through dsh's own filesystem skill provider, with an always-on bootstrap.",
+  "description": "Superpowers skills for the DeepSeek Harness (dsh): a full engineering methodology registered on dsh's own skill registry, with an always-on bootstrap.",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -70,14 +70,9 @@
     "synced": "2026-10-22"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-skill-filesystem": ">=0.0.1-rc.1 <0.3.0-0"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-skill-filesystem": {
-      "optional": true
-    }
+    "@deepseek-ai/dsh-skill": ">=0.0.1-rc.1 <0.3.0-0"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-skill-filesystem": ">=0.0.1-rc.1 <0.3.0-0"
+    "@deepseek-ai/dsh-skill": ">=0.0.1-rc.1 <0.3.0-0"
   }
 }

@@ -1,7 +1,7 @@
 {
   "$comment": "Single source of truth for everything this package DERIVES. scripts/generate-artifacts.mjs reads this file and rebuilds the derived artifacts; --check fails CI when a derived file has drifted. Anything not listed here is hand-written and must not be regenerated.",
   "config": {
-    "$comment": "The plugin's config surface, mirrored into cordis.patch.yml as the row's `config:`. Key order is stable so generated diffs stay readable. Only genuinely optional behaviour is here: `watch` is the provider's own default and the section order is fixed, so neither is a knob.",
+    "$comment": "The plugin's config surface, mirrored into cordis.patch.yml as the row's `config:`. Key order is stable so generated diffs stay readable. Only genuinely optional behaviour is here: the section order is fixed and the catalog is read once at activation, so neither is a knob.",
     "defaults": {
       "skills": true,
       "bootstrap": true,
@@ -13,7 +13,7 @@
       "skills": "Register the skills catalog. false = bootstrap only.",
       "bootstrap": "Inject the using-superpowers bootstrap into the system prompt.",
       "toolMapping": "Append the dsh tool mapping to the bootstrap.",
-      "providerName": "Skill-provider name registered on ctx.skills.",
+      "providerName": "Provider label recorded on every skill registered with ctx.skills.",
       "skillsDir": "Skills root. Empty = resolve automatically: config → SUPERPOWERS_SKILLS_DIR → <package>/skills → <package>/../skills."
     }
   },

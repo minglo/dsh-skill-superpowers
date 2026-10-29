@@ -34,9 +34,9 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
-      # The dsh filesystem provider is an optional peer, so a plain install
-      # leaves it out; the suite needs it to exercise the real provider.
-      - run: npm install --no-save @deepseek-ai/dsh-skill-filesystem
+      # No dependencies to install: the plugin only uses Node built-ins and the
+      # suite drives it through a stub registry, so a bare checkout verifies the
+      # same way CI does.
 
       - name: Verify before publishing
         run: |

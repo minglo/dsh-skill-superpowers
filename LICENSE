@@ -12,10 +12,11 @@ licence requires of any redistribution:
   index.js, references/dsh-tools.md  icanfinish11's dsh_superpowers
                                      https://github.com/icanfinish11/dsh_superpowers
 
-`index.js` is a derived work: its adapter shape, provider registration and
-skills-directory resolution follow icanfinish11's implementation, with the
-dependency-fallback path removed in favour of reuse of dsh's own filesystem
-provider. See README "Credits and licence" for the division of authorship.
+`index.js` is a derived work: its adapter shape, skills-directory resolution
+and system-prompt bootstrap follow icanfinish11's implementation, reworked to
+register the vendored catalog through dsh's own skill registry
+(`ctx.skills.register`) instead of delegating to a skill-provider package. See
+README "Credits and licence" for the division of authorship.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -3,12 +3,19 @@
 // This plugin contributes Superpowers to dsh through the harness's OWN surfaces
 // rather than reimplementing them:
 //
-//   1. `ctx.skills.registerProvider(...)` — the vendored `skills/` tree is served
-//      by dsh's own `@deepseek-ai/dsh-skill-filesystem` provider, mounted as a
-//      private instance pointed at this package. Using the official provider gets
-//      its frontmatter parsing, flat-file support, `whenToUse`, `invocation`
-//      policy, symlink handling and directory watching for free — including
-//      improvements shipped in future dsh releases.
+//   1. `ctx.skills.register(...)` — the vendored `skills/` tree is read once at
+//      activation and registered as runtime skills on dsh's own skill registry
+//      (`@deepseek-ai/dsh-skill`). Only the registry is needed, and every dsh
+//      deployment carries it, so there is one code path everywhere: CLI, Web,
+//      SDK and the Desktop build. No `@deepseek-ai/dsh-skill-filesystem` import,
+//      no resolution probe, no fallback that behaves differently from the
+//      primary path.
+//
+//      The trade is that runtime skills carry the registry's fixed runtime rank
+//      (250), which outranks user-scope skills (400/500) and is outranked by
+//      project-scope skills (100/200). For a plugin that ships its own catalog
+//      that is the honest ordering: installing the plugin means its skills are
+//      the ones the session sees, and a project may still override them.
 //
 //   2. `ctx.systemPrompt.section(...)` — the `using-superpowers` bootstrap is
 //      contributed as an always-on system-prompt section. dsh has no
@@ -18,15 +25,15 @@
 //      stable as a prompt prefix instead of a re-emitted user message that
 //      would grow the transcript every turn.
 //
-// Why the official provider is imported lazily, inside `apply()`:
+// Why the tree is read synchronously, once:
 //
-//   A static `import` of a dsh-internal package makes the whole module fail to
-//   load when that package is not resolvable from the profile's node_modules —
-//   the plugin then cannot even report why. Importing on activation lets the
-//   plugin degrade with a clear diagnostic instead of a bare
-//   ERR_MODULE_NOT_FOUND, and keeps `--dump-config` working on hosts without it.
+//   `register` belongs to activation, and the skills ship inside this package,
+//   so they cannot change while the process runs. Reading them eagerly keeps
+//   the catalog independent of the working directory, the profile layout and
+//   any filesystem service, which is exactly where the previous provider
+//   delegation broke on Desktop.
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -39,12 +46,16 @@ export const name = 'superpowers'
 /** dsh services this plugin registers against. */
 export const inject = ['skills', 'systemPrompt']
 
-/** Skill-provider name, unique within the calling context's layer. */
+/** Provider label shown for every registered skill. */
 const PROVIDER_NAME = 'superpowers'
 /** The bootstrap skill whose body is injected every session. */
 const BOOTSTRAP_SKILL = 'using-superpowers'
 /** Skill body filename, used only to validate a candidate skills root. */
 const SKILL_FILE = 'SKILL.md'
+/** The registry's kebab-case rule; a name outside it is dropped, not repaired. */
+const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+/** Discovery source recorded on every skill, matching packaged dsh providers. */
+const SKILL_SOURCE = 'bundled'
 /** Rendered at the top of the injected bootstrap, for tests and diagnostics. */
 const BOOTSTRAP_MARKER = 'superpowers:using-superpowers bootstrap for dsh'
 /** Prompt section name; unique per scope, so a second mount throws loudly. */
@@ -58,8 +69,6 @@ const BOOTSTRAP_SECTION = 'superpowers:bootstrap'
 const BOOTSTRAP_SECTION_ORDER = 121
 /** Long-form tool mapping, relative to the bootstrap skill directory. */
 const TOOL_MAPPING_REFERENCE = join('references', 'dsh-tools.md')
-/** The official provider, imported lazily. */
-const FILESYSTEM_PROVIDER = '@deepseek-ai/dsh-skill-filesystem'
 
 /**
  * Register the Superpowers skill catalog and bootstrap on dsh.
@@ -81,57 +90,12 @@ export function apply(ctx, config = {}) {
     )
   } else if (settings.skills) {
     logger.info(`registering the Superpowers skill catalog from ${skillsDir}`)
-    // `registerProvider` must be called synchronously during apply, so the
-    // official provider is resolved lazily: registration happens now, the
-    // module import happens on first discovery. dsh's provider contract
-    // explicitly allows this — "remote initialization, authentication, and
-    // discovery are awaited inside `list()`".
-    ctx.skills.registerProvider((control) => {
-      let pending
-      const resolveDelegate = () => {
-        if (pending !== undefined) return pending
-        pending = import(FILESYSTEM_PROVIDER)
-          .then(({ FileSystemSkillProvider }) => new FileSystemSkillProvider(ctx, control, {
-            providerName: settings.providerName,
-            // A private root only: the project/user roots belong to the
-            // harness's own filesystem provider instance. `watch` is left to the
-            // provider's own default (true), so watching behaves exactly like
-            // the harness's other skill roots and improves with it.
-            includeDefaultRoots: false,
-            bundledSkillDir: skillsDir,
-          }))
-          .catch((error) => {
-            logger.error(
-              `cannot load ${FILESYSTEM_PROVIDER} (${messageOf(error)}). The Superpowers `
-              + 'skill catalog is unavailable; install it so it resolves from the profile.',
-            )
-            // Do not memoize the failure: a later catalog refresh retries, so a
-            // transient resolution problem does not disable skills for the session.
-            pending = undefined
-            return undefined
-          })
-        return pending
-      }
-
-      return {
-        name: settings.providerName,
-        async list(options) {
-          const delegate = await resolveDelegate()
-          return delegate === undefined ? [] : delegate.list(options)
-        },
-        async get(candidate, options) {
-          const delegate = await resolveDelegate()
-          return delegate === undefined ? undefined : delegate.get(candidate, options)
-        },
-        // The official provider also self-disposes when `control.signal` aborts,
-        // which is what the harness relies on; forwarding `dispose` keeps the
-        // wrapper a faithful drop-in for callers that tear down explicitly.
-        async dispose() {
-          const delegate = await resolveDelegate()
-          await delegate?.dispose()
-        },
-      }
-    })
+    for (const skill of readSkills(skillsDir, settings.providerName, logger)) {
+      // `register` binds its own teardown to the registry context; the extra
+      // effect keeps the disposer attached to THIS plugin, so unloading the
+      // plugin withdraws its skills instead of leaving them behind.
+      ctx.effect(() => ctx.skills.register(skill))
+    }
   }
 
   if (settings.bootstrap) {
@@ -180,6 +144,147 @@ function resolveSkillsDir(config) {
 /** True when `dir` holds a Superpowers skills tree. */
 function looksLikeSkillsDir(dir) {
   return existsSync(join(dir, BOOTSTRAP_SKILL, SKILL_FILE))
+}
+
+/**
+ * Read every skill bundle under `skillsDir` into registration input.
+ *
+ * The tree ships inside this package, so it is read once, synchronously, at
+ * activation: no watcher, no cwd sensitivity, no filesystem service. A bundle
+ * that cannot be parsed is reported and skipped rather than registered empty.
+ *
+ * @param skillsDir - absolute path to the vendored `skills/` tree.
+ * @param providerName - provider label recorded on every skill.
+ * @param logger - structured logger for diagnostics.
+ * @returns registration inputs ready for `ctx.skills.register()`.
+ */
+function readSkills(skillsDir, providerName, logger) {
+  let entries
+  try {
+    entries = readdirSync(skillsDir, { withFileTypes: true })
+  } catch (error) {
+    logger.warn(`cannot read the skills directory ${skillsDir}: ${messageOf(error)}`)
+    return []
+  }
+
+  const skills = []
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory()) continue
+    const skillDir = join(skillsDir, entry.name)
+    const skillFile = join(skillDir, SKILL_FILE)
+    let raw
+    try {
+      raw = readFileSync(skillFile, 'utf8')
+    } catch (error) {
+      // A directory without a SKILL.md is not a skill bundle; anything else is
+      // an actual read failure and worth a line in the log.
+      if (!['ENOENT', 'ENOTDIR', 'EISDIR'].includes(error?.code)) {
+        logger.warn(`cannot read ${skillFile}: ${messageOf(error)}`)
+      }
+      continue
+    }
+
+    const parsed = parseSkillFile(raw)
+    if (parsed === undefined) {
+      logger.warn(`${skillFile} has no usable frontmatter — skipped`)
+      continue
+    }
+    if (!SKILL_NAME.test(parsed.name)) {
+      logger.warn(`${skillFile} ignored: "${parsed.name}" is not a kebab-case skill name`)
+      continue
+    }
+    if (parsed.name !== entry.name) {
+      logger.warn(`${entry.name}: frontmatter name "${parsed.name}" differs from its directory name`)
+    }
+    if (parsed.description === '') {
+      logger.warn(`${skillFile} ignored: frontmatter requires a description`)
+      continue
+    }
+
+    skills.push({
+      name: parsed.name,
+      description: parsed.description,
+      ...(parsed.whenToUse === undefined ? {} : { whenToUse: parsed.whenToUse }),
+      invocation: parsed.invocation,
+      source: SKILL_SOURCE,
+      provider: providerName,
+      // Relative references (`references/…`, `scripts/…`) resolve against the
+      // bundle directory, exactly as they did through the filesystem provider.
+      resourceBase: { kind: 'directory', path: skillDir },
+      path: skillFile,
+      content: parsed.body,
+    })
+  }
+  return skills
+}
+
+/**
+ * Parse one `SKILL.md` into the fields the registry accepts.
+ * @param raw - file contents.
+ * @returns the parsed skill, or `undefined` without a name.
+ */
+function parseSkillFile(raw) {
+  const parsed = parseFrontmatterBlock(raw)
+  if (parsed === undefined) return undefined
+  const name = scalarField(parsed.metadata.name)
+  if (name === undefined) return undefined
+  return {
+    name,
+    description: scalarField(parsed.metadata.description) ?? '',
+    whenToUse: scalarField(parsed.metadata.whenToUse),
+    invocation: {
+      modelInvocable: parsed.metadata['disable-model-invocation'] !== 'true',
+      userInvocable: parsed.metadata['user-invocable'] !== 'false',
+    },
+    body: parsed.body,
+  }
+}
+
+/**
+ * Split a leading YAML frontmatter block into scalar metadata plus the body.
+ *
+ * Only the shapes Superpowers uses are interpreted: `key: value` lines with
+ * optional matching quotes, plus the two invocation booleans. A block scalar or
+ * sequence value yields an empty string, so a skill whose description depends
+ * on one is skipped and reported instead of being registered with `">-"` as
+ * its description. The official provider parses full YAML; this is the subset
+ * the vendored tree actually contains.
+ *
+ * @param text - raw file contents.
+ * @returns the metadata, the body after the block, or `undefined` without one.
+ */
+function parseFrontmatterBlock(text) {
+  const normalized = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/.exec(normalized)
+  if (match === null) return undefined
+
+  const metadata = {}
+  for (const rawLine of match[1].split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (line === '' || line.startsWith('#')) continue
+    const entry = /^([A-Za-z][\w-]*):[ \t]*(.*)$/.exec(line)
+    // Indented continuation lines belong to the previous key and are dropped:
+    // none of the vendored skills use a multi-line scalar.
+    if (entry === null) continue
+    let value = entry[2].trim()
+    if (/^[|>][+-]?\d*$/.test(value)) {
+      value = ''
+    } else if (
+      (value.startsWith('"') && value.endsWith('"') && value.length > 1)
+      || (value.startsWith("'") && value.endsWith("'") && value.length > 1)
+    ) {
+      value = value.slice(1, -1)
+    }
+    metadata[entry[1]] = value
+  }
+  return { metadata, body: match[2].trim() }
+}
+
+/** Trimmed non-empty string field, or `undefined`. */
+function scalarField(value) {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
 }
 
 /**
@@ -250,11 +355,8 @@ function dshToolMapping(skillsDir) {
  * Returns `undefined` when the file has no frontmatter to strip.
  */
 function stripFrontmatter(text) {
-  const normalized = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
-  const match = normalized.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?([\s\S]*)$/)
-  if (match === null) return undefined
-  const body = match[2].trim()
-  return body === '' ? undefined : body
+  const body = parseFrontmatterBlock(text)?.body
+  return body === undefined || body === '' ? undefined : body
 }
 
 /** Structured logger over the context logger, falling back to no-ops. */
