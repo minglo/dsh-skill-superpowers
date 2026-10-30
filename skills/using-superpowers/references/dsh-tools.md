@@ -75,6 +75,14 @@ one item per checklist entry, and mark an item complete the moment it is done.
 
 ## Background work
 
-Long shell commands and agents run as managed background jobs. Start them with
-`run_in_background: true`, read progress with `job_output` (use `wait: true` only
-when genuinely blocked), and stop them with `job_kill`. Never busy-poll.
+Long shell commands and subagents run concurrently and report back by notice.
+`bash` / `pwsh` take `run_in_background: true`; `subagent` returns
+`started subagent <childId>` at once and never waits for the child. A finished
+job or child posts a completion notice into the session — a busy agent receives
+it on its next step, an idle one is woken by it — so the result arrives without
+you asking.
+
+So: **never poll a task and never `sleep` to re-check one.** When nothing but a
+child's result is left, end your turn; the notice starts the next one. `job_output`
+(`wait: true` only when genuinely blocked), `job_list` and `job_kill` are for
+collecting, listing and cancelling work — not for watching it.

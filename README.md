@@ -181,10 +181,18 @@ node tests/test-plugin.mjs                 # 跑测试套件
    只有引用会被改写，绝不改 `name:` 字段或目录名。
 2. 把 `references/dsh-tools.md` 安装进技能树。
 3. 改写 Platform Adaptation 一节，只提 dsh。
-4. **剪掉其它 harness 的参考文档**（`claude-code-tools.md`、`codex-tools.md` 等）。
+4. **改写 `subagent-driven-development` 的「等待派发子智能体」一段**。上游要求控制者
+   按 5–10 分钟分段醒来、段间核对子智能体；dsh 自己的 subagent 指引正好相反 ——
+   结束轮次，完成通知会开启下一轮。两条并存时模型会退化成 `sleep` 轮询。这一段
+   **整段替换**，锚点消失是硬错误（见下），不会静默退回上游文本。
+5. **剪掉其它 harness 的参考文档**（`claude-code-tools.md`、`codex-tools.md` 等）。
    本包只支持 dsh；附上另外六种 harness 的映射等于宣传一个我们提供不了的支持，
    而且当 dsh 成为唯一在场的 harness 后，它们的交叉引用会悬空。
-5. 恢复 shebang 脚本的可执行位（见下）。
+6. 恢复 shebang 脚本的可执行位（见下）。
+
+第 4 条与其它适配不同：`SUBAGENT_WAIT_SECTION` 匹配不到时 `sync-skills.mjs` **抛错退出**，
+而不是当作「无需改写」。上游重写了那段就必须停一次，由人重新给出 dsh 措辞 ——
+否则轮询会静默回归。修法写在 `.agents/skills/superpower-sync-upstream/SKILL.md`。
 
 `skills/` 里有些脚本带 shebang（`#!/usr/bin/env bash`），而技能文档会**直接执行**它们
 （写 `scripts/task-start PLAN N`，不是 `bash scripts/task-start`）。直接执行要求文件带

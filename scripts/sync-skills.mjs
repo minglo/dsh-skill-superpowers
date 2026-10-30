@@ -12,7 +12,12 @@
 //      model must see bare names);
 //   2. `using-superpowers/references/dsh-tools.md`, copied from the package's
 //      `references/dsh-tools.md`;
-//   3. one Platform Adaptation line registering dsh.
+//   3. one Platform Adaptation line registering dsh;
+//   4. the "Waiting on dispatched subagents" paragraph in
+//      `subagent-driven-development` rewritten to dsh's waiting model (end the
+//      turn; the completion notice starts the next one). Upstream's text tells
+//      the controller to wake itself every five to ten minutes, which dsh's own
+//      subagent guidance forbids and which the model renders as `sleep`-polling.
 //
 // Drift is measured the only way that is both honest and useful: this adapter's
 // adaptations are applied to a throwaway copy of the upstream tree, and THAT is
@@ -106,6 +111,26 @@ const PERSONAL_SKILLS_REPLACEMENT =
   + 'See [dsh-tools.md](../using-superpowers/references/dsh-tools.md).\n'
 
 /**
+ * `subagent-driven-development` tells the controller to wait in bounded stretches
+ * and reconcile its live children between them. dsh's own subagent guidance says
+ * the opposite — "end your turn instead of sleeping or polling; the next result
+ * starts a new turn" — and a model given both settles on a `sleep` loop that
+ * re-checks the child on a timer. Replace the paragraph wholesale.
+ *
+ * A missing anchor is an error, not a skip: silently keeping upstream's text
+ * would bring the polling back, so a reshaped upstream must stop the sync and
+ * ask for a human to re-derive the replacement.
+ */
+const SUBAGENT_WAIT_SKILL = 'subagent-driven-development/SKILL.md'
+const SUBAGENT_WAIT_SECTION = /\*\*Waiting on dispatched subagents:\*\*[\s\S]*?(?=\n\n#{2,4} )/
+const SUBAGENT_WAIT_REPLACEMENT = `**Waiting on dispatched subagents:** end your turn. A settled
+child notifies this session and that notice starts a new turn, so results arrive
+on their own: there is nothing to poll and no timer to keep. Until then do local
+work — ledger updates, packaging the next review, reading reports. Never sleep or
+re-check a child on a schedule; \`job_list\` shows what is still live when you need
+to know whether anything is owed.`
+
+/**
  * Home-directory rewrites: only the paths that would send a dsh user somewhere
  * that does not exist.
  *
@@ -174,6 +199,7 @@ function applyAdaptations(root, { log = false } = {}) {
     platformEntry: false,
     pruned: [],
     rewrotePersonalSkills: false,
+    subagentWait: false,
     harnessNeutral: [],
     files: 0,
   }
@@ -235,6 +261,26 @@ function applyAdaptations(root, { log = false } = {}) {
     }
   }
 
+  // `subagent-driven-development` must wait the dsh way: end the turn and let the
+  // completion notice start the next one. See SUBAGENT_WAIT_SECTION.
+  const subagentWaitFile = join(root, SUBAGENT_WAIT_SKILL)
+  if (existsSync(subagentWaitFile)) {
+    const before = readFileSync(subagentWaitFile, 'utf8')
+    if (!SUBAGENT_WAIT_SECTION.test(before)) {
+      throw new Error(
+        `${SUBAGENT_WAIT_SKILL}: the "Waiting on dispatched subagents" paragraph is gone or reshaped.\n`
+        + 'Its dsh replacement is what keeps the controller from sleep-polling children, so a\n'
+        + 'sync must not silently vendor upstream text back. Read the new paragraph, then update\n'
+        + 'SUBAGENT_WAIT_SECTION and SUBAGENT_WAIT_REPLACEMENT in scripts/sync-skills.mjs.',
+      )
+    }
+    const after = before.replace(SUBAGENT_WAIT_SECTION, SUBAGENT_WAIT_REPLACEMENT)
+    if (after !== before) {
+      writeFileSync(subagentWaitFile, after, 'utf8')
+      summary.subagentWait = true
+    }
+  }
+
   // Our own skills are excluded: they are this package's own prose and may
   // deliberately name a harness when explaining what upstream assumes.
   //
@@ -287,6 +333,7 @@ function applyAdaptations(root, { log = false } = {}) {
   if (log) {
     for (const line of summary.namespaced) console.log(`    namespace stripped: ${line}`)
     for (const line of summary.harnessNeutral) console.log(`    harness-neutral: ${line}`)
+    if (summary.subagentWait) console.log(`    subagent wait section rewritten: ${SUBAGENT_WAIT_SKILL}`)
   }
   return summary
 }

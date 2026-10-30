@@ -1,6 +1,6 @@
 ---
 name: superpower-sync-upstream
-description: Use when the vendored upstream skills tree must be refreshed from a new upstream release. Re-vendors it, re-applies the dsh adaptations (the namespace strip, the tool mapping, the harness prune) and updates the recorded pin.
+description: Use when the vendored upstream skills tree must be refreshed from a new upstream release. Re-vendors it, re-applies the dsh adaptations (the namespace strip, the tool mapping, the harness prune, the subagent-wait rewrite) and updates the recorded pin.
 ---
 
 # Syncing the Vendored Upstream
@@ -79,6 +79,7 @@ that tree, so a sync never touches these guides.
 | **Prune the other harnesses' reference docs** | This package supports dsh only. Their cross-references dangle once dsh is the only harness, and shipping them advertises support we cannot provide. |
 | Rewrite the Platform Adaptation section | Upstream lists one row per harness; after the prune those rows point at deleted files. |
 | Rewrite the personal-skills path in `writing-skills` | It names two pruned files in prose. |
+| Rewrite the subagent-wait paragraph in `subagent-driven-development` | Upstream tells the controller to wait in bounded stretches (five to ten minutes) and reconcile its live children between them. dsh's own subagent guidance says the opposite — "end your turn instead of sleeping or polling; the next result starts a new turn" — and a model handed both settles on a `sleep` loop. The paragraph is replaced wholesale; unlike the other adaptations, a missing anchor is a hard error (see below). |
 | Restore the executable bit on shebang files | Some packagers and git-on-Windows drop it, and the skills invoke those scripts directly. |
 
 The only file exempt from the namespace strip is the tool mapping, whose prose
@@ -89,6 +90,15 @@ dsh. These guides live outside `skills/`, so the pass never reaches them.
 vendored and then survive the prune unless you add it to
 `PRUNED_HARNESS_REFERENCES` in `scripts/sync-skills.mjs`. `check-upstream.mjs`
 warns about exactly this.
+
+**If an adaptation's anchor disappears, the sync stops instead of shipping
+upstream text back.** The subagent-wait rewrite is the only adaptation with this
+guard, because vendoring its paragraph back would silently restart the polling.
+An exit whose message is `the "Waiting on dispatched subagents" paragraph is gone
+or reshaped` means upstream rewrote that paragraph: read the new text, decide what
+dsh's waiting model should say, then update `SUBAGENT_WAIT_SECTION` and
+`SUBAGENT_WAIT_REPLACEMENT` in `scripts/sync-skills.mjs` and re-run. Do not delete
+the check to get past it.
 
 ### 5. Update the pin, then re-record the baseline
 
