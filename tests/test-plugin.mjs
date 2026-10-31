@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 
@@ -288,7 +288,13 @@ test('no skill still carries a Claude Code namespace reference', () => {
   const offenders = out
     .split('\n')
     .filter(Boolean)
-    .map((line) => line.replace(packageRoot + '/', ''))
+    // grep prints whatever separator the platform uses: `/` on POSIX, `\` on
+    // Windows. A bare `replace(packageRoot + '/', '')` therefore strips nothing
+    // on Windows, leaving absolute paths that never match the POSIX-style keys
+    // in `exempt` — so the exempt file was reported as an offender there while
+    // the same tree passed on Linux CI. Normalise through `path.relative` and
+    // compare in POSIX form on both platforms.
+    .map((line) => relative(packageRoot, line).split(sep).join('/'))
     .filter((rel) => !exempt.has(rel))
   assert.deepEqual(offenders, [], `these files still reference superpowers: ${offenders.join(', ')}`)
 
