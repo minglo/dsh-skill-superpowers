@@ -57,6 +57,7 @@ jobs:
           VER="$(node -p "require('./package.json').version")"
           if npm view "$PKG"@"$VER" version >/dev/null 2>&1; then
             echo "$PKG@$VER is already on npm, nothing to do"
+            echo "skip=true" >> "$GITHUB_ENV"
           elif ! npm view "$PKG" version >/dev/null 2>&1; then
             echo "::notice title=First release::'$PKG' is not on npm yet, so OIDC cannot"
             echo "publish it (npm only allows a trusted publisher on an existing package)."
