@@ -24,6 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `git merge-base --is-ancestor` below needs the full history. With
+          # the default shallow clone every existing tag looks like "not in
+          # history", so the workflow deleted a perfectly good tag on every
+          # push and then skipped recreating it because the version was
+          # already on npm — which also turned the published release back
+          # into a draft.
+          fetch-depth: 0
 
       - id: ver
         run: echo "v=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
@@ -39,6 +47,7 @@ jobs:
           # Resolve the tag's commit without needing to have fetched tags.
           REMOTE="${{ github.sha }}"
           EXISTING="$(git ls-remote --tags origin "refs/tags/$TAG" 2>/dev/null | cut -f1)"
+          RECREATING=""
 
           if [ -n "$EXISTING" ]; then
             # A tag whose commit is no longer in main's history is stale — this
@@ -52,9 +61,13 @@ jobs:
             fi
             echo "tag $TAG points at $EXISTING, which is not in history; recreating"
             git push origin ":refs/tags/$TAG"
+            # A stale tag must be recreated even when the version is already
+            # on npm: otherwise the tag stays deleted and the release it backs
+            # has nothing to point at.
+            RECREATING=1
           fi
 
-          if npm view "$PKG"@"${TAG#v}" version >/dev/null 2>&1; then
+          if [ -z "$RECREATING" ] && npm view "$PKG"@"${TAG#v}" version >/dev/null 2>&1; then
             echo "version ${TAG#v} already on npm, skip (bump version to release)"
             exit 0
           fi
