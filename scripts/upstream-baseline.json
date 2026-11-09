@@ -106,22 +106,18 @@
       "references/preflight.md",
       "references/resuming.md",
       "scripts/review-package",
+      "scripts/sdd-repo",
       "scripts/sdd-workspace",
       "scripts/task-brief",
       "task-reviewer-prompt.md"
     ],
     "systematic-debugging": [
-      "CREATION-LOG.md",
       "SKILL.md",
       "condition-based-waiting-example.ts",
       "condition-based-waiting.md",
       "defense-in-depth.md",
       "find-polluter.sh",
-      "root-cause-tracing.md",
-      "test-academic.md",
-      "test-pressure-1.md",
-      "test-pressure-2.md",
-      "test-pressure-3.md"
+      "root-cause-tracing.md"
     ],
     "test-driven-development": [
       "SKILL.md",
@@ -160,14 +156,14 @@
     ]
   },
   "skillLineCounts": {
-    "brainstorming": 295,
+    "brainstorming": 317,
     "diagnosing-superpowers": 121,
     "dispatching-parallel-agents": 168,
-    "executing-plans": 322,
+    "executing-plans": 324,
     "finishing-a-development-branch": 226,
     "receiving-code-review": 206,
     "requesting-code-review": 96,
-    "subagent-driven-development": 337,
+    "subagent-driven-development": 340,
     "systematic-debugging": 284,
     "test-driven-development": 331,
     "using-git-worktrees": 168,

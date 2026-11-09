@@ -318,8 +318,8 @@ test('the harness-neutral pass rewrites home paths, never harness names', () => 
     assert.match(text, /CLAUDE\.md/, `${rel} should keep naming CLAUDE.md verbatim`)
   }
 
-  // A worked example and a creation log are records of what happened, not
-  // advice for a dsh user; retargeting their paths would falsify them.
+  // A worked example is a record of what happened, not advice for a dsh user;
+  // retargeting its paths would falsify it.
   const example = join(packageRoot, 'skills/writing-skills/references/CLAUDE_MD_TESTING.md')
   assert.ok(existsSync(example), 'the example should keep its upstream name')
   assert.ok(
@@ -327,9 +327,6 @@ test('the harness-neutral pass rewrites home paths, never harness names', () => 
     'no renamed copy should be produced',
   )
   assert.match(readFileSync(example, 'utf8'), /~\/\.claude\/skills\//, 'its recorded paths are evidence')
-
-  const log = readFileSync(join(packageRoot, 'skills/systematic-debugging/CREATION-LOG.md'), 'utf8')
-  assert.match(log, /~\/\.claude\/CLAUDE\.md/, 'the recorded path should survive untouched')
 })
 
 test('the maintenance skills are contributors-only, not part of the served catalog', async () => {

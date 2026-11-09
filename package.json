@@ -65,9 +65,9 @@
   "upstream": {
     "$comment": "The upstream project this package vendors, and the revision last vendored. The repository URL here is the single source the scripts read — nothing else hard-codes it.",
     "repository": "https://github.com/obra/superpowers",
-    "tag": "v7.0.1",
-    "commit": "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
-    "synced": "2026-10-22"
+    "tag": "v7.0.2",
+    "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+    "synced": "2026-11-09"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-skill": ">=0.0.1-rc.1 <0.3.0-0"
