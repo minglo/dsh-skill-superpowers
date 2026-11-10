@@ -21,9 +21,9 @@ permissions:
 
 jobs:
   tag:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # `git merge-base --is-ancestor` below needs the full history. With
           # the default shallow clone every existing tag looks like "not in
