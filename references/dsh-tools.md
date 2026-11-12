@@ -81,8 +81,16 @@ on or off.
 
 `subagent` and `subagent_fork` start independently managed activations and
 immediately return `started subagent <name>`. This acknowledgement is not the
-child's result. The runtime owns execution, outcome reporting, and cleanup; a
-completion notice delivers the final answer.
+child's result. The runtime owns execution, outcome reporting, and cleanup. If
+you are still online when the child finishes, it automatically delivers a
+completion notice. The notice includes the final answer unless the child sent
+you a message just before finishing; in that case, use the child's closing
+message as the result and `send_message` if more work is needed. A parent that
+is offline when the child finishes does not receive that automatic delivery, so
+do not assume a completion notice was queued. After reconnecting, use the
+child's available Session history to recover its recorded result, or ask a
+continuable child for the result with `send_message`; a one-shot external
+execution cannot be resumed for a new answer.
 
 The root agent is named `lead`. Each child name is unique among its creator's
 children. A nested descendant has a root-relative path such as
@@ -112,8 +120,9 @@ unsupported recipients, and rejected admission fail explicitly.
 
 Use `send_message` to steer an active local child or continue it after it
 settles. External backends such as Codex, Claude Code, ACP, and DSH SDK
-executions are one-shot from the caller's control perspective: their completion
-notice carries the final answer and they do not accept follow-up messages.
+executions are one-shot from the caller's control perspective: they do not
+accept follow-up messages, and any completion delivery follows the same online
+and closing-message rules.
 
 #### Inbox waiting and completion
 
@@ -334,9 +343,14 @@ one item per checklist entry, and mark an item complete the moment it is done.
 Long shell commands and ordinary subagents run concurrently and report back by
 notice. `bash` / `pwsh` take `run_in_background: true`; an ordinary `subagent`
 returns `started subagent <name>` at once and never waits for the child. A
-finished job or ordinary child posts a completion notice into the session — a
-busy agent receives it on its next step, an idle one is woken by it — so the
-result arrives without you asking.
+finished job posts a completion notice into the session. If you are still online
+when an ordinary child finishes, the runtime delivers its completion notice,
+including the final answer unless the child sent you a message just before
+finishing; in that case, the child's closing message carries the result. An
+offline parent does not receive automatic delivery, so do not assume a notice
+was queued: after reconnecting, use the child's available Session history or
+ask a continuable child for the result with `send_message`. A busy agent
+receives a delivered notice on its next step, and an idle one is woken by it.
 
 So: **never busy-poll a task and never `sleep` to re-check one.** When nothing
 but an ordinary child's result is left, end your turn; the notice starts the
