@@ -304,6 +304,8 @@ After changing a task, explicitly message any agent that needs to act on the
 update. Task changes do not end `wait_agent`, add inbox messages, or start idle
 agents.
 
+The root agent must wait for required teammates before giving the final answer.
+
 #### Shared workspace safety
 
 The root and all descendants in the tree share the same working directory and
