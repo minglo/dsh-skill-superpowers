@@ -8,7 +8,7 @@ source for both.
 | Action skills request | dsh equivalent |
 | --- | --- |
 | Invoke a skill | The `skill` tool, with the exact kebab-case name (`brainstorming`, `test-driven-development`) |
-| Create a todo / mark complete (`TodoWrite`) | `todo_write` |
+| Create a todo / mark complete (`TodoWrite`) | `todo_write` — whole-list replace, owned by the calling agent session; see [Todo lists](#todo-lists) |
 | Read a file | `read` |
 | Create a file | `write` |
 | Edit a file | `edit` |
@@ -399,11 +399,35 @@ Workflow and Ralph remain independent execution surfaces. Their presence does
 not imply that Team is enabled, and Team mode does not move their orchestration
 onto the shared board automatically.
 
-## Task lists
+## Todo lists
 
-`todo_write` is dsh's task list. Superpowers skills that mention `TodoWrite` (or
-"create a todo per item") mean this tool: send the complete list on every call,
-one item per checklist entry, and mark an item complete the moment it is done.
+`todo_write` is dsh's task list — the per-session checklist, not the Agent
+Teams board above; that board is `team_task_*` and nothing here applies to it.
+Superpowers skills that mention `TodoWrite` (or "create a todo per item") mean
+this tool. Four properties differ from what that name suggests, and each has
+produced a missing or stale checklist:
+
+- **Whole-list replacement.** Every call sends the complete list and replaces
+  the previous one; an item you omit is deleted. Marking one task does not mean
+  sending only that task.
+- **Owned by one agent session.** Subagents keep their own lists and neither
+  side sees the other's. A parent's checklist never reaches a child, and a
+  child's never comes back.
+- **The display is turn-scoped.** The `todos` projection clears when the next
+  turn starts, so the finished list stays visible only until then. The
+  `todo/write` events remain in the session log, but there is no read-back
+  tool: a new turn that needs a visible plan must write the list again.
+- **At most one `in_progress`** unless the deployment allows parallel work. A
+  call that breaks a deployment's rule is rejected whole, leaving the previous
+  list in place.
+
+Treat the list as write-only state the model maintains: nothing marks an item
+complete except the next full write, and progress claims belong to the
+artifacts — commits, tests, reports, ledger — not to the checklist. When
+`todo_write` is not in the visible tools, either the composition does not mount
+it or the preset presents tools through `run_code` (PTC), where the generated
+SDK carries it. Keep the plan in the plan document or ledger rather than
+simulating a tool this session cannot call.
 
 ## Background work
 
