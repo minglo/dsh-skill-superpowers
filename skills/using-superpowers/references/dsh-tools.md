@@ -142,6 +142,24 @@ act. Task creation, assignment, completion, and mode changes neither add inbox
 messages nor release an inbox wait. Do not turn `wait_agent` into a busy-polling
 loop.
 
+#### Settlement notices
+
+A notice reaches the parent only while that Session is live: the child was
+accepted, delivery goes to its parent, and the parent's fiber is still active in
+the same tree. Otherwise the runtime drops it, with nothing queued for later.
+
+A missing notice proves nothing: not that the child runs on, not that it
+succeeded. Creation that never produced a child — capacity, depth cap, an
+unresolvable route, a denied provider, a backend startup failure — reports
+through the `subagent` call itself and never sends one. Do not wait on it.
+
+A child that did run always settles, and the notice carries why: `completed`, or
+`error`, `max-tokens`, `refusal`, `aborted`. Anything other than `completed`
+means unfinished. If the child sent its parent a message just before finishing,
+the notice says so and omits the closing text; that message is the result. A
+teardown failure after a normal finish is reported on the `subagent/end` event,
+not in the notice, which keeps the child's own reason.
+
 #### Interruption and backend lifecycle
 
 When `interrupt_agent` is visible, it accepts `agent` and requests interruption
@@ -197,6 +215,13 @@ tree and can own shared tasks. When Team is disabled, their creation, discovery,
 messaging, and completion semantics are unchanged; only the shared board is
 unavailable. Team is optional for SDD and must not replace fresh-worker
 isolation with persistent-role reuse.
+
+Close each task's board entry as that task closes, not at the end of the plan.
+Either the implementer claims and completes its own task, or the controller
+completes it with the current revision as soon as the implementer's completion
+notice and report confirm the work. A fix round that settles an earlier finding
+does not reopen or re-complete anything; the task stays complete while the
+review trail lives in the report file.
 
 For a large planned fan-out, `workflow` runs a JavaScript orchestration script
 whose `agent`, `pipeline`, `parallel`, and phase facilities coordinate many
@@ -280,7 +305,7 @@ flushes without another mode record.
 | `team_task_create` | Creates one unowned pending task with a subject, complete details and acceptance criteria, optional blocker task ids, and optional advisory workspace-relative write scopes. The default board limit is 256 non-deleted tasks. |
 | `team_task_list` | Lists non-deleted tasks with owner, revision, blockers, readiness, and write-scope-overlap warnings. Supports exact `status`, `owner`, `unowned`, and `ready` filters plus cursor/limit pagination. `owner` and `unowned` cannot be combined. The default limit is 50 and the maximum is 100. |
 | `team_task_get` | Reads the complete latest value of one task before changing or executing it, including a deleted task's retained tombstone. |
-| `team_task_update` | Mutates a task with compare-and-set using `expected_revision`. Actions are `claim`, `release`, `edit`, `set_dependencies`, `complete`, `reopen`, `reassign`, and `delete`. A stale revision is rejected rather than overwriting newer work. |
+| `team_task_update` | Mutates a task with compare-and-set using `expected_revision`. Actions are `claim`, `release`, `edit`, `set_dependencies`, `complete`, `reopen`, `reassign`, and `delete`. A stale revision is rejected rather than overwriting newer work. Completion is never inferred from a child finishing; only this action marks a task done. |
 
 Task `owner` arguments accept `lead`, a full root-relative name such as
 `reviewer/checker`, or a Session id. Results report the assigned name when one
@@ -304,7 +329,47 @@ After changing a task, explicitly message any agent that needs to act on the
 update. Task changes do not end `wait_agent`, add inbox messages, or start idle
 agents.
 
-The root agent must wait for required teammates before giving the final answer.
+The root agent must wait for required teammates, and reconcile the board, before
+giving the final answer.
+
+#### Keeping the board current
+
+Board status is a record the agents write, not something the runtime observes.
+Nothing marks a task complete by itself: a child starts, works, and returns a
+completion notice and a commit, and its task sits at whatever status it had. A
+finished child is not a completed task, and an untouched task is not an
+unstarted one. Treat the board as stale until you have written it.
+
+So close each task when its work closes, not at the end of the plan:
+
+- **At every batch boundary.** A batch is one dispatch plus the returns it
+  produces. Before dispatching work that depends on it — or before reporting it
+  done — mark each delivered task `complete` with its current revision. A final
+  bulk update done from memory drops tasks and hides a stalled batch behind a
+  board that still says `in_progress`.
+- **When a task was absorbed, reshaped, or never claimed.** Close the entry
+  explicitly: `complete` it, or `edit` it to say where the work now lives. A
+  finished task left `pending` because no child took it misreports the plan.
+- **When you cannot write the update.** If Team was disabled, a revision
+  conflict could not be resolved, or the board is unreachable, say which tasks
+  are stale and why in the final answer. Never present an unsynced board as
+  matching the work.
+
+Before the final answer, reconcile the whole board against the artifacts —
+`git log`, the plan's ledger, the review and audit reports — and fix each
+mismatch. A board of `completed` entries is a claim; the artifacts are the
+evidence, and a task left non-complete must be genuinely blocked or an
+explicitly reported gap.
+
+Accept a delivery before you mark its task complete: the notice must belong to
+this dispatch, carry `completed`, and its closing text — or the message standing
+in for it — must be read. Then check the claim against what the acceptance
+criteria name: the commit, the changed files, the tests actually run, the report,
+the ledger. `completed` says the turn ended normally, not that the work is right;
+the child grades its own work from the inside, and the controller exists to check
+the same claim from the outside. With no notice and no result, recover it from the
+child's Session or by asking a continuable child, or record it as unreconciled —
+never as done.
 
 #### Shared workspace safety
 
