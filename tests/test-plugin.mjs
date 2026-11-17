@@ -385,3 +385,11 @@ test('the wait rule reaches the rendered SDD skill and lives in its source', () 
   assert.ok(source.includes(sentence), 'the rule must live in the replacement text')
 })
 
+test('the tool mapping does not re-license waiting for a child', () => {
+  const text = readFileSync(join(packageRoot, 'references/dsh-tools.md'), 'utf8')
+  for (const stale of ['is the bounded wait', 'genuinely waiting for new input']) {
+    assert.ok(!text.includes(stale), 'the mapping must not keep: ' + stale)
+  }
+  assert.ok(text.includes('you sent a message'), 'the legitimate use must survive')
+})
+

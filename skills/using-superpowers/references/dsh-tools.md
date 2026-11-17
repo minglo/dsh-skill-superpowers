@@ -448,7 +448,7 @@ ordinary child's result is left, end your turn; the notice starts the next one.
 `job_kill` are for collecting, listing, and cancelling work — not for watching
 it.
 
-`wait_agent` is the bounded wait for the calling agent's own next-step inbox.
-Use it when genuinely waiting for new input, then read the delivered messages;
-it is not a generic wait for another agent's status or for a Team task change,
-and it must not become a busy-polling loop.
+`wait_agent` answers one question — is there new input for me right now? — and
+reports only `timedOut`. Use it when you asked for a message and the next step
+cannot proceed without the reply; it is not a wait for another agent's status or
+a Team task change, and it must not become a busy-polling loop.
