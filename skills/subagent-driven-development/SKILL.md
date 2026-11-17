@@ -184,12 +184,14 @@ Everything you paste into a dispatch prompt — and everything a subagent
 prints back — stays resident in your context for the rest of the session
 and is re-read on every later turn. Hand artifacts over as files.
 
-**Waiting on dispatched subagents:** end your turn. A settled
-child notifies this session and that notice starts a new turn, so results arrive
-on their own: there is nothing to poll and no timer to keep. Until then do local
-work — ledger updates, packaging the next review, reading reports. Never sleep or
-re-check a child on a schedule; `job_list` shows what is still live when you need
-to know whether anything is owed.
+**Waiting on dispatched subagents:** do not poll for completion — `wait_agent` cannot
+report settlement, and `list_agents` cannot either (`inactive` is not `completed`).
+Do the local work whose inputs already exist: ledger, todos, reports already on
+disk. If there is none, end your turn at once. Do not manufacture work to avoid an
+empty turn. Ending the turn costs nothing; the child's result arrives on its own.
+
+"Continuous execution" forbids stopping to ask whether to continue; it does not
+forbid ending a turn. Ending a turn to wait for a child is part of executing the plan.
 
 ### 1. Dispatch the implementer
 

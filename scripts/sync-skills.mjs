@@ -120,15 +120,22 @@ const PERSONAL_SKILLS_REPLACEMENT =
  * A missing anchor is an error, not a skip: silently keeping upstream's text
  * would bring the polling back, so a reshaped upstream must stop the sync and
  * ask for a human to re-derive the replacement.
+ *
+ * The failure returned by a different route in 2026-11: wait_agent advertised
+ * as a bounded wait that includes completion notifications, plus a settlement
+ * notice that read as "ending the turn loses it". The replacement therefore
+ * names both tools and says settlement is not what either reports.
  */
 const SUBAGENT_WAIT_SKILL = 'subagent-driven-development/SKILL.md'
 const SUBAGENT_WAIT_SECTION = /\*\*Waiting on dispatched subagents:\*\*[\s\S]*?(?=\n\n#{2,4} )/
-const SUBAGENT_WAIT_REPLACEMENT = `**Waiting on dispatched subagents:** end your turn. A settled
-child notifies this session and that notice starts a new turn, so results arrive
-on their own: there is nothing to poll and no timer to keep. Until then do local
-work — ledger updates, packaging the next review, reading reports. Never sleep or
-re-check a child on a schedule; \`job_list\` shows what is still live when you need
-to know whether anything is owed.`
+const SUBAGENT_WAIT_REPLACEMENT = `**Waiting on dispatched subagents:** do not poll for completion — \`wait_agent\` cannot
+report settlement, and \`list_agents\` cannot either (\`inactive\` is not \`completed\`).
+Do the local work whose inputs already exist: ledger, todos, reports already on
+disk. If there is none, end your turn at once. Do not manufacture work to avoid an
+empty turn. Ending the turn costs nothing; the child's result arrives on its own.
+
+"Continuous execution" forbids stopping to ask whether to continue; it does not
+forbid ending a turn. Ending a turn to wait for a child is part of executing the plan.`
 
 /**
  * Home-directory rewrites: only the paths that would send a dsh user somewhere

@@ -373,3 +373,15 @@ test('the controller wait rule is stated in every copy of the tool mapping', () 
   }
 })
 
+test('the wait rule reaches the rendered SDD skill and lives in its source', () => {
+  const sentence = "Ending the turn costs nothing; the child's result arrives on its own."
+  const sdd = readFileSync(join(packageRoot, 'skills/subagent-driven-development/SKILL.md'), 'utf8')
+  assert.ok(sdd.includes(sentence), 'the rendered SDD skill must carry the rule')
+  assert.ok(
+    sdd.includes('Ending a turn to wait for a child is part of executing the plan.'),
+    'the rendered SDD skill must scope continuous execution',
+  )
+  const source = readFileSync(join(packageRoot, 'scripts/sync-skills.mjs'), 'utf8')
+  assert.ok(source.includes(sentence), 'the rule must live in the replacement text')
+})
+
