@@ -73,7 +73,7 @@ on or off.
 | `subagent_fork` | Starts a child seeded with all completed turns of the current conversation, excluding the current in-flight turn. Use it when new work should build on this context rather than when a skill requires an isolated fresh worker. |
 | `list_agents` | Lists the root `lead`, the caller, and every reachable continuable descendant in the same tree. Rows contain `name`, `status`, and an optional description; there is no `scope` argument. |
 | `send_message` | Sends to another agent in the same tree with `send_message({ agent, message })`. `agent` accepts a returned name such as `reviewer/checker` or a Session id. |
-| `wait_agent` | Waits for input at the exact caller's next-step inbox. This is an ordinary subagent control and does not depend on Team mode. |
+| `wait_agent` | Waits for input at the exact caller's next-step inbox. It reports only whether input arrived, never which agent settled. This is an ordinary subagent control and does not depend on Team mode. |
 | `interrupt_agent` | Conditional on the composition. Uses `agent` and interrupts only a descendant of the caller. Built-in base and Web standard/cordis/ptc configurations set `interrupt: false`, so the tool is absent unless explicitly enabled. |
 | `list_subagent_models` | Conditional on model discovery being enabled. Discovers authorized child provider/model routes and reasoning efforts; the same policy can expose `provider`, `model`, and `reasoning_effort` on delegation calls. |
 
@@ -100,9 +100,11 @@ Session ids remain accepted for historical or unnamed entries.
 
 Start independent delegations together in one assistant message and continue
 useful work while they run. A busy parent receives completion at its next step;
-an idle parent is woken by it. Never busy-poll a child and never sleep to
-re-check one. When only a child's result remains, end the turn and let the notice
-start the next one.
+an idle parent is woken by it. A controller waits only by ending its turn: any
+in-turn block on a child is the same mistake, whether it is `sleep`, `wait_agent`,
+`job_output` with `wait: true`, or re-checking `list_agents`. Ending the turn is
+not a progress report, not a stop, and not going offline; the settlement notice
+starts the next turn. Ending the turn costs nothing; the child's result arrives on its own.
 
 #### Discovery and messaging
 
@@ -121,32 +123,28 @@ unsupported recipients, and rejected admission fail explicitly.
 Use `send_message` to steer an active local child or continue it after it
 settles. External backends such as Codex, Claude Code, ACP, and DSH SDK
 executions are one-shot from the caller's control perspective: they do not
-accept follow-up messages, and any completion delivery follows the same online
-and closing-message rules.
+accept follow-up messages, and any completion delivery follows the same
+open-session and closing-message rules.
 
 #### Inbox waiting and completion
 
-`wait_agent` waits for the caller's own next-step inbox, including agent
-messages, completion notifications, and user steering. Pending input returns
-immediately unless an earlier wait in the same model tool call already reported
-it. Later input ends the wait; other agents' status changes, unrelated inboxes,
-queued next-turn messages, and Team task changes do not.
+`wait_agent` answers one question — is there new input for me right now? — and
+its result is only `timedOut`. It never says which agent settled, or that one
+did, so it is not a way to wait for a subagent. A controller that dispatches a
+child and then calls it is waiting for an answer the tool does not carry.
 
-The tool does not consume input or start an agent. `timedOut: false` means new
-input is pending, which is delivered to the model after code execution finishes;
-it does not prove that a particular task completed. `timeout_ms` defaults to
-30000 and accepts integers from 10000 through 3600000.
-
-After a Team task mutation, use `send_message` whenever another agent needs to
-act. Task creation, assignment, completion, and mode changes neither add inbox
-messages nor release an inbox wait. Do not turn `wait_agent` into a busy-polling
-loop.
+It is the right tool for the case it names: you sent a message, the next step
+cannot proceed without the reply, and there is no turn to end. A dispatched
+child is not that case — pending input reaches a busy agent at its next step and
+wakes an idle one, so waiting adds only the block.
 
 #### Settlement notices
 
-A notice reaches the parent only while that Session is live: the child was
-accepted, delivery goes to its parent, and the parent's fiber is still active in
-the same tree. Otherwise the runtime drops it, with nothing queued for later.
+A notice reaches the parent only while that Session is open: the child was
+accepted, delivery goes to its parent, and the parent is still in the same tree.
+Ending a turn does not close the Session — an idle parent is woken by the
+notice. What loses it is a closed Session or a torn-down tree, with nothing
+queued for later.
 
 A missing notice proves nothing: not that the child runs on, not that it
 succeeded. Creation that never produced a child — capacity, depth cap, an
@@ -326,11 +324,11 @@ execution. Inactivity, interruption, process exit, and failed work do not
 automatically release ownership.
 
 After changing a task, explicitly message any agent that needs to act on the
-update. Task changes do not end `wait_agent`, add inbox messages, or start idle
-agents.
+update. Task changes neither deliver a message nor wake an idle agent.
 
-The root agent must wait for required teammates, and reconcile the board, before
-giving the final answer.
+The root agent must let required teammates settle before giving the final
+answer — by ending its turn, not by blocking in it — and reconcile the board
+before it does.
 
 #### Keeping the board current
 
@@ -434,20 +432,21 @@ simulating a tool this session cannot call.
 Long shell commands and ordinary subagents run concurrently and report back by
 notice. `bash` / `pwsh` take `run_in_background: true`; an ordinary `subagent`
 returns `started subagent <name>` at once and never waits for the child. A
-finished job posts a completion notice into the session. If you are still online
-when an ordinary child finishes, the runtime delivers its completion notice,
-including the final answer unless the child sent you a message just before
-finishing; in that case, the child's closing message carries the result. An
-offline parent does not receive automatic delivery, so do not assume a notice
-was queued: after reconnecting, use the child's available Session history or
-ask a continuable child for the result with `send_message`. A busy agent
-receives a delivered notice on its next step, and an idle one is woken by it.
+finished job posts a completion notice into the session. If this session is
+still open when an ordinary child finishes, the runtime delivers its completion
+notice, including the final answer unless the child sent you a message just
+before finishing; in that case, the child's closing message carries the result.
+A parent whose Session has closed does not receive automatic delivery, so do not
+assume a notice was queued: after reconnecting, use the child's available
+Session history or ask a continuable child for the result with `send_message`. A
+busy agent receives a delivered notice on its next step, and an idle one is
+woken by it.
 
-So: **never busy-poll a task and never `sleep` to re-check one.** When nothing
-but an ordinary child's result is left, end your turn; the notice starts the
-next one. `job_output` (`wait: true` only when genuinely blocked), `job_list`,
-and `job_kill` are for collecting, listing, and cancelling work — not for
-watching it.
+So: **the wait is the turn ending, not a timer inside it.** When nothing but an
+ordinary child's result is left, end your turn; the notice starts the next one.
+`job_output` (`wait: true` only when genuinely blocked), `job_list`, and
+`job_kill` are for collecting, listing, and cancelling work — not for watching
+it.
 
 `wait_agent` is the bounded wait for the calling agent's own next-step inbox.
 Use it when genuinely waiting for new input, then read the delivered messages;

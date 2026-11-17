@@ -354,3 +354,22 @@ test('the maintenance skills are contributors-only, not part of the served catal
   }
 })
 
+test('the controller wait rule is stated in every copy of the tool mapping', () => {
+  const sentence = "Ending the turn costs nothing; the child's result arrives on its own."
+  const files = [
+    'references/dsh-tools.md',
+    'skills/using-superpowers/references/dsh-tools.md',
+  ]
+  for (const rel of files) {
+    const text = readFileSync(join(packageRoot, rel), 'utf8')
+    assert.ok(text.includes(sentence), rel + ' must carry the canonical wait sentence')
+    for (const stale of [
+      'The root agent must wait for required teammates',
+      'If you are still online',
+      'A notice reaches the parent only while that Session is live',
+    ]) {
+      assert.ok(!text.includes(stale), rel + ' must not keep: ' + stale)
+    }
+  }
+})
+
