@@ -8,7 +8,7 @@ source for both.
 | Action skills request | dsh equivalent |
 | --- | --- |
 | Invoke a skill | The `skill` tool, with the exact kebab-case name (`brainstorming`, `test-driven-development`) |
-| Create a todo / mark complete (`TodoWrite`) | `todo_write` — whole-list replace, owned by the calling agent session; see [Todo lists](#todo-lists) |
+| Create a todo / mark complete (`TodoWrite`) | `todo_write` maintains the calling agent Session's own checklist; see [Todo lists](#todo-lists). It is not the Agent Teams shared board; shared tasks use `team_task_*`. |
 | Read a file | `read` |
 | Create a file | `write` |
 | Edit a file | `edit` |
@@ -142,23 +142,33 @@ act. Task creation, assignment, completion, and mode changes neither add inbox
 messages nor release an inbox wait. Do not turn `wait_agent` into a busy-polling
 loop.
 
-#### Settlement notices
+#### Result delivery and turn completion
 
-A notice reaches the parent only while that Session is live: the child was
-accepted, delivery goes to its parent, and the parent's fiber is still active in
-the same tree. Otherwise the runtime drops it, with nothing queued for later.
+The `subagent` and `subagent_fork` creation receipts confirm startup, not the
+work result. After dispatching, continue independent work or dispatch other
+ready children. When only child results remain, end the turn. The completion
+notice is delivered to the parent and wakes an idle but live parent Session;
+ending the turn does not cut off result delivery.
 
-A missing notice proves nothing: not that the child runs on, not that it
-succeeded. Creation that never produced a child — capacity, depth cap, an
-unresolvable route, a denied provider, a backend startup failure — reports
-through the `subagent` call itself and never sends one. Do not wait on it.
+A completion notice carries the child's stop reason: `completed`, `error`,
+`max-tokens`, `refusal`, or `aborted`. Only `completed` means the child turn
+finished normally; handle every other reason as unfinished or failed. The notice
+normally contains the final answer. If a local child sent its parent a message
+just before finishing, the notice omits the closing text and that message is the
+result.
 
-A child that did run always settles, and the notice carries why: `completed`, or
-`error`, `max-tokens`, `refusal`, `aborted`. Anything other than `completed`
-means unfinished. If the child sent its parent a message just before finishing,
-the notice says so and omits the closing text; that message is the result. A
-teardown failure after a normal finish is reported on the `subagent/end` event,
-not in the notice, which keeps the child's own reason.
+If creation never produced a child — capacity, depth cap, an unresolvable route,
+a denied provider, or a backend startup failure — the creation call reports the
+failure directly and produces no separate completion notice to wait for.
+
+When the parent Session has been disposed or its process has exited, the runtime
+cannot deliver an automatic notice and does not queue one for later. After
+reconnecting, recover the recorded result from the child's available Session
+history, or ask a continuable child to summarize it through `send_message`. A
+one-shot external execution cannot be resumed to generate a new answer.
+
+A teardown failure after a normal finish is reported on the `subagent/end` event;
+it does not rewrite the child's own stop reason in the completion notice.
 
 #### Interruption and backend lifecycle
 
@@ -216,12 +226,29 @@ messaging, and completion semantics are unchanged; only the shared board is
 unavailable. Team is optional for SDD and must not replace fresh-worker
 isolation with persistent-role reuse.
 
-Close each task's board entry as that task closes, not at the end of the plan.
-Either the implementer claims and completes its own task, or the controller
-completes it with the current revision as soon as the implementer's completion
-notice and report confirm the work. A fix round that settles an earlier finding
-does not reopen or re-complete anything; the task stays complete while the
-review trail lives in the report file.
+Accept every SDD task from its actual delivery and evidence, not from a child
+ending or a board status. When a result arrives, read its completion notice or
+the closing message standing in for it, then check the commit, changed files,
+tests actually run, report, and ledger against the task's acceptance criteria.
+
+When Team is enabled and the task has a shared entry, read its latest status and
+revision after acceptance before synchronizing the board:
+
+- If the implementer already accepted and completed its task, the controller
+  verifies the delivery and record without repeating `complete`.
+- If the task is still `in_progress` and the controller confirms acceptance, its
+  owner or the root Lead completes it with the latest revision.
+- If delivery failed, the stop reason is not `completed`, or evidence is missing
+  or unreconciled, do not complete it; record the actual blocker or gap.
+
+When Team is disabled, there is no shared board to write. Perform the same
+acceptance and closure in the plan ledger and report without simulating
+`team_task_*` operations.
+
+Append fix-round work and re-review evidence to the report. A task already
+accepted and complete stays complete without redundant reopen/complete writes.
+If later acceptance shows that the original delivery did not meet its criteria,
+handle the real work gap instead of letting the board status conceal it.
 
 For a large planned fan-out, `workflow` runs a JavaScript orchestration script
 whose `agent`, `pipeline`, `parallel`, and phase facilities coordinate many
@@ -305,7 +332,7 @@ flushes without another mode record.
 | `team_task_create` | Creates one unowned pending task with a subject, complete details and acceptance criteria, optional blocker task ids, and optional advisory workspace-relative write scopes. The default board limit is 256 non-deleted tasks. |
 | `team_task_list` | Lists non-deleted tasks with owner, revision, blockers, readiness, and write-scope-overlap warnings. Supports exact `status`, `owner`, `unowned`, and `ready` filters plus cursor/limit pagination. `owner` and `unowned` cannot be combined. The default limit is 50 and the maximum is 100. |
 | `team_task_get` | Reads the complete latest value of one task before changing or executing it, including a deleted task's retained tombstone. |
-| `team_task_update` | Mutates a task with compare-and-set using `expected_revision`. Actions are `claim`, `release`, `edit`, `set_dependencies`, `complete`, `reopen`, `reassign`, and `delete`. A stale revision is rejected rather than overwriting newer work. Completion is never inferred from a child finishing; only this action marks a task done. |
+| `team_task_update` | After reading the latest task status and revision, uses `expected_revision` for compare-and-set actions: `claim`, `release`, `edit`, `set_dependencies`, `complete`, `reopen`, `reassign`, and `delete`. Any member can claim a ready unowned task; other ordinary mutations require the task owner or root Lead, and only the root Lead can `reassign`. `complete` applies only to an accepted `in_progress` task, and `reopen` only to a `completed` task. A child finishing never changes task status automatically. A stale revision or illegal transition fails; read the task again before deciding what to do next. |
 
 Task `owner` arguments accept `lead`, a full root-relative name such as
 `reviewer/checker`, or a Session id. Results report the assigned name when one
@@ -329,47 +356,58 @@ After changing a task, explicitly message any agent that needs to act on the
 update. Task changes do not end `wait_agent`, add inbox messages, or start idle
 agents.
 
-The root agent must wait for required teammates, and reconcile the board, before
-giving the final answer.
+The root agent obtains the deliveries required for its final answer and keeps the
+final report consistent with the board and actual artifacts. This work advances
+through completion notices and batch acceptance, not by keeping one turn running.
 
-#### Keeping the board current
+#### Batch progression and board reconciliation
 
-Board status is a record the agents write, not something the runtime observes.
-Nothing marks a task complete by itself: a child starts, works, and returns a
-completion notice and a commit, and its task sits at whatever status it had. A
-finished child is not a completed task, and an untouched task is not an
-unstarted one. Treat the board as stale until you have written it.
+Run each batch through this cycle:
 
-So close each task when its work closes, not at the end of the plan:
+1. **Dispatch.** Start the currently ready implementers, reviewers, or other
+   children, and record their tasks, acceptance criteria, and expected artifacts.
+2. **Advance.** While children run, continue independent work or dispatch
+   follow-up tasks whose dependencies have been satisfied.
+3. **Yield the turn.** When no other work can advance and only child results
+   remain, end the turn. Completion notices wake the parent when results arrive.
+4. **Accept.** Read each completion notice belonging to the batch; when the
+   notice omits closing text, read the child message standing in for it. Check
+   commits, files, tests, reports, and the ledger against acceptance criteria.
+5. **Synchronize.** With Team enabled, read each related task's latest status and
+   revision, then update the board from the actual acceptance result. With Team
+   disabled, update the plan ledger and report instead.
+6. **Start the next batch.** After acceptance and synchronization, dispatch tasks
+   whose dependencies are now satisfied. If no new work is executable, end the
+   turn and let the remaining notices resume it.
 
-- **At every batch boundary.** A batch is one dispatch plus the returns it
-  produces. Before dispatching work that depends on it — or before reporting it
-  done — mark each delivered task `complete` with its current revision. A final
-  bulk update done from memory drops tasks and hides a stalled batch behind a
-  board that still says `in_progress`.
-- **When a task was absorbed, reshaped, or never claimed.** Close the entry
-  explicitly: `complete` it, or `edit` it to say where the work now lives. A
-  finished task left `pending` because no child took it misreports the plan.
-- **When you cannot write the update.** If Team was disabled, a revision
-  conflict could not be resolved, or the board is unreachable, say which tasks
-  are stale and why in the final answer. Never present an unsynced board as
-  matching the work.
+The board is a shared durable record; not every entry must be written by the root.
+Implementers can claim and complete tasks, and other members can update entries
+within their authority. The root reads and reconciles the latest shared state. It
+does not infer completion from a child's `running` or `inactive` status or repeat
+a state transition another member already completed correctly.
 
-Before the final answer, reconcile the whole board against the artifacts —
-`git log`, the plan's ledger, the review and audit reports — and fix each
-mismatch. A board of `completed` entries is a claim; the artifacts are the
-evidence, and a task left non-complete must be genuinely blocked or an
-explicitly reported gap.
+Synchronize according to actual task state:
 
-Accept a delivery before you mark its task complete: the notice must belong to
-this dispatch, carry `completed`, and its closing text — or the message standing
-in for it — must be read. Then check the claim against what the acceptance
-criteria name: the commit, the changed files, the tests actually run, the report,
-the ledger. `completed` says the turn ended normally, not that the work is right;
-the child grades its own work from the inside, and the controller exists to check
-the same claim from the outside. With no notice and no result, recover it from the
-child's Session or by asking a continuable child, or record it as unreconciled —
-never as done.
+- A delivered task still `in_progress` is completed after acceptance.
+- A task already marked `completed` by its implementer or another member has its
+  evidence checked without another completion write.
+- A pending task cannot be completed directly. When work was absorbed, reshaped,
+  or is no longer needed, choose `edit`, a legal reassignment/claim path, or
+  `delete` according to the intended outcome.
+- A failed, abnormal, or unreconciled delivery stays incomplete, with the reason
+  recorded in the task description, report, or ledger.
+- Task writes do not send inbox messages. When another agent must act on an
+  update, explicitly notify it with `send_message`.
+
+Before the final answer, read the whole board and reconcile it with `git log`,
+the plan ledger, reports, reviews, and audits. Every `completed` entry needs
+corresponding delivery evidence; every incomplete entry must name a real blocker,
+unfinished work, or an explicitly reported gap.
+
+If Team is disabled, the board is unreachable, or a revision conflict remains
+unresolved, the final answer lists the entries that could not be synchronized and
+why. The plan ledger and actual artifacts remain evidence of work state; do not
+describe the board as synchronized when it is not.
 
 #### Shared workspace safety
 
@@ -401,33 +439,39 @@ onto the shared board automatically.
 
 ## Todo lists
 
-`todo_write` is dsh's task list — the per-session checklist, not the Agent
-Teams board above; that board is `team_task_*` and nothing here applies to it.
-Superpowers skills that mention `TodoWrite` (or "create a todo per item") mean
-this tool. Four properties differ from what that name suggests, and each has
-produced a missing or stale checklist:
+`todo_write` maintains the calling agent Session's own checklist for organizing
+current work and showing progress. It is not the Agent Teams shared board and
+cannot replace `team_task_*`, cross-agent ownership, dependencies, or delivery
+acceptance records.
 
-- **Whole-list replacement.** Every call sends the complete list and replaces
-  the previous one; an item you omit is deleted. Marking one task does not mean
-  sending only that task.
-- **Owned by one agent session.** Subagents keep their own lists and neither
-  side sees the other's. A parent's checklist never reaches a child, and a
-  child's never comes back.
-- **The display is turn-scoped.** The `todos` projection clears when the next
-  turn starts, so the finished list stays visible only until then. The
-  `todo/write` events remain in the session log, but there is no read-back
-  tool: a new turn that needs a visible plan must write the list again.
-- **At most one `in_progress`** unless the deployment allows parallel work. A
-  call that breaks a deployment's rule is rejected whole, leaving the previous
-  list in place.
+Every call submits the complete list and replaces the Session's previous list;
+omitted entries are deleted. Content must be nonempty and unique. When task
+status changes, submit the whole list again rather than only the changed item.
 
-Treat the list as write-only state the model maintains: nothing marks an item
-complete except the next full write, and progress claims belong to the
-artifacts — commits, tests, reports, ledger — not to the checklist. When
-`todo_write` is not in the visible tools, either the composition does not mount
-it or the preset presents tools through `run_code` (PTC), where the generated
-SDK carries it. Keep the plan in the plan document or ledger rather than
-simulating a tool this session cannot call.
+The deployment configuration controls whether multiple entries may be
+`in_progress`. Without parallel work, a list contains at most one; a call with
+more is rejected as a whole and appends no partial result. When parallel work is
+allowed, mark every entry actually being worked on in parallel as `in_progress`.
+
+Each agent Session owns independent list state. A child's write does not change
+its parent's current list, and a parent's write does not change its child's.
+`subagent_fork` can inherit the parent's textual conversation history, but it does
+not share the parent's live `todos` state.
+
+The `todos` projection keeps the finished checklist visible through the end of
+its turn and clears when the next turn starts. Write the complete list again when
+a new turn needs a visible plan. Keep durable cross-turn plans, progress, and
+acceptance evidence in plan documents, reports, or ledgers rather than relying
+only on this projection.
+
+There is no dedicated `todo_read` tool. `todo/write` events remain in the Session
+log; when the composition provides event tools such as `session_event_search` or
+`session_event_read`, they can read historical writes, but doing so does not
+restore the cleared `todos` projection.
+
+If `todo_write` is absent, check whether the preset exposes it through the
+`run_code` (PTC) generated SDK. When it cannot be called, continue recording work
+in the plan document or ledger instead of simulating an unavailable tool.
 
 ## Background work
 
