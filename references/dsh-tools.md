@@ -19,7 +19,7 @@ source for both.
 | Dispatch a subagent (`Task`, `Subagent`) | Use `subagent` for a fresh, isolated child or `subagent_fork` when the child must inherit this conversation. Use `workflow` for large planned fan-outs. When the root Session enables Agent Teams, coordinate that same subagent tree through `team_task_*`; Team does not provide another creation path. |
 | Ask your human partner a question | `ask_user_question` |
 | Present a plan for approval | dsh plan mode — `exit_plan_mode` hands the plan to your human partner |
-| Track a long-running objective | `create_goal`, `get_goal`, `update_goal` |
+| Track a long-running objective | `create_goal`, `get_goal`, `update_goal`; for human-pause authority and confirmation, see [Goals and human pause](#goals-and-human-pause). |
 
 ## Skills
 
@@ -360,12 +360,42 @@ The root agent obtains the deliveries required for its final answer and keeps th
 final report consistent with the board and actual artifacts. This work advances
 through completion notices and batch acceptance, not by keeping one turn running.
 
-#### Batch progression and board reconciliation
+#### Shared work items and batch coordination
+
+`team_task_*` maintains shared coordination records owned by the root Session;
+`todo_write` maintains each calling agent Session's own checklist. There is no
+automatic synchronization, parent-child hierarchy, or completion roll-up between
+them.
+
+The board does not prescribe plan-level or execution-level granularity. A work
+item can be shared whenever other agents need to discover, claim, wait for,
+resume, or independently accept it. Implementation, review, fixes, and re-review
+can each have their own entries when they need independent coordination; a large
+number of cards is not automatically a coordination failure.
+
+A solo task with no shared coordination needs does not require a Team entry,
+whether the root or a child performs it.
+
+Every shared work item needs concrete deliverables and acceptance criteria. Read
+existing tasks before creating one to avoid duplicating the same work. When scope
+changes, prefer reading and editing the existing entry. Continue to update board
+status explicitly through the authorized revision and legal state transitions.
+
+Team does not create a project-stage hierarchy. If the lead chooses to represent
+project stages in its own Todo, that is a local organizational convention. Team
+entries can reference those stage names in their subject or description, but the
+runtime does
+not aggregate them automatically. The lead checks all required deliveries and
+acceptance evidence for a stage before marking it completed; one completed Team
+card is not enough. A lead that is not coordinating a project needs neither this
+stage system nor a Team mapping for its solo tasks.
 
 Run each batch through this cycle:
 
 1. **Dispatch.** Start the currently ready implementers, reviewers, or other
-   children, and record their tasks, acceptance criteria, and expected artifacts.
+   children, and record their mappings to shared work items, acceptance criteria,
+   and expected artifacts. Create or update Team entries according to actual
+   coordination needs, not mechanically for every new role or execution round.
 2. **Advance.** While children run, continue independent work or dispatch
    follow-up tasks whose dependencies have been satisfied.
 3. **Yield the turn.** When no other work can advance and only child results
@@ -437,12 +467,51 @@ Workflow and Ralph remain independent execution surfaces. Their presence does
 not imply that Team is enabled, and Team mode does not move their orchestration
 onto the shared board automatically.
 
+## Goals and human pause
+
+The goal tools' returned state is authoritative. Do not claim that a goal is
+paused merely because you acknowledged the user's request before the tool has
+confirmed it.
+
+When a top-level user directly asks to pause, handle it in the **same turn that
+contains that human message**:
+
+1. If the current goal id and revision are unknown, call `get_goal` first.
+2. In that same turn, call `update_goal` with `action: "pause"` and the latest
+   revision.
+3. Check the result. Tell the user the goal is paused only after the response
+   confirms `phase: "paused"`.
+
+Do not postpone pausing until a subagent completion notice, an automatic goal
+round, or another background event triggers a turn. Those turns do not contain
+top-level human authority, so the runtime rejects `pause`.
+
+If pause was not executed or was rejected, the goal must not be treated as
+paused. Report its actual state and ask the user to pause through a new direct
+human instruction or the Host control. Do not repeat the same unauthorized call
+in later automatic rounds, and do not use `blocked` as a substitute for a human
+pause.
+
+`blocked` is for a real, persistent impediment to the objective. It is not for a
+user who wants to restart, continue later, or stop automatic advancement
+temporarily.
+
 ## Todo lists
 
-`todo_write` maintains the calling agent Session's own checklist for organizing
-current work and showing progress. It is not the Agent Teams shared board and
-cannot replace `team_task_*`, cross-agent ownership, dependencies, or delivery
-acceptance records.
+`todo_write` maintains the calling agent Session's own checklist. Its meaning is
+determined by the Session's current responsibility, not by its root or child
+position in the agent tree.
+
+A root coordinating a multi-stage project can use it to maintain a project-level
+stage plan. A root performing a small solo task can use it simply for personal
+execution steps, without creating a project-stage system or Team entry. Children
+use it for their own execution checklists in the same way.
+
+Whatever organizational style is used, `todo_write` is not the Agent Teams shared
+board. It cannot replace `team_task_*`, cross-agent ownership, shared
+dependencies, or delivery acceptance records, and it never synchronizes with Team
+entries automatically. Project progress and acceptance claims need supporting
+artifacts, reports, and ledgers, not only checked Todo items.
 
 Every call submits the complete list and replaces the Session's previous list;
 omitted entries are deleted. Content must be nonempty and unique. When task
