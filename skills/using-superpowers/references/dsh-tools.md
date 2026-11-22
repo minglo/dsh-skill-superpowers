@@ -469,9 +469,47 @@ onto the shared board automatically.
 
 ## Goals and human pause
 
-The goal tools' returned state is authoritative. Do not claim that a goal is
-paused merely because you acknowledged the user's request before the tool has
-confirmed it.
+Only `phase: "active"` and `activation: "armed"` goals continue automatically.
+The goal tools' returned state is authoritative: narrating completion, blockage,
+or pause changes neither the goal phase nor its activation. To close a goal, read
+its latest state, call the appropriate `update_goal` transition, and verify the
+result.
+
+### Complete or block a goal
+
+When the whole objective is achieved and supported by complete acceptance
+evidence:
+
+1. If the current goal id and revision are unknown, call `get_goal` first.
+2. Call `update_goal` with `action: "complete"` and the latest revision.
+3. Confirm `phase: "complete"`; also confirm `activation: "disarmed"` before
+   claiming that automatic continuation has stopped.
+
+When a concrete, persistent condition prevents further progress, do not merely
+describe the blocker in the final answer. Close the goal as blocked:
+
+1. Call `get_goal` to read the current id, revision, rounds started, and
+   activation.
+2. Call `update_goal` with `action: "blocked"` and the latest revision. In
+   `blocked_reason`, name the concrete missing condition and the external input
+   or permission required to continue.
+3. Confirm `phase: "blocked"` and `activation: "disarmed"` before reporting that
+   the goal is blocked and automatic continuation has stopped.
+
+Automatic goal rounds enforce a configured minimum consecutive-round count before
+`blocked` is accepted; the default of three consecutive goal rounds applies when
+the deployment does not override it. If the call is rejected because the threshold
+is unmet or for any other reason, the goal has not become blocked. Do not claim
+that it has, and do not repeat the same ineligible call without changing the
+condition. Continue other useful work or ask the user for the missing input, a
+decision, or an explicit human pause. When an automatic round becomes eligible,
+use the tool to make the blocked transition instead of narrating the blocker again.
+
+`blocked` is for a real, persistent impediment to the objective. It is not for a
+user who wants to restart, continue later, or stop automatic advancement
+temporarily.
+
+### Pause on a direct human request
 
 When a top-level user directly asks to pause, handle it in the **same turn that
 contains that human message**:
@@ -479,8 +517,8 @@ contains that human message**:
 1. If the current goal id and revision are unknown, call `get_goal` first.
 2. In that same turn, call `update_goal` with `action: "pause"` and the latest
    revision.
-3. Check the result. Tell the user the goal is paused only after the response
-   confirms `phase: "paused"`.
+3. Confirm `phase: "paused"` and `activation: "disarmed"` before telling the user
+   that the goal is paused and automatic continuation has stopped.
 
 Do not postpone pausing until a subagent completion notice, an automatic goal
 round, or another background event triggers a turn. Those turns do not contain
@@ -491,10 +529,6 @@ paused. Report its actual state and ask the user to pause through a new direct
 human instruction or the Host control. Do not repeat the same unauthorized call
 in later automatic rounds, and do not use `blocked` as a substitute for a human
 pause.
-
-`blocked` is for a real, persistent impediment to the objective. It is not for a
-user who wants to restart, continue later, or stop automatic advancement
-temporarily.
 
 ## Todo lists
 
